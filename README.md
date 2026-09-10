@@ -1,6 +1,6 @@
 # SoundPair
 
-A modern, lightweight C# Windows Forms application designed to route audio via **VB-Cable** to **two Bluetooth headsets simultaneously** with millisecond-precision delay synchronization, independent volume controls, and real-time Windows master volume linking.
+A modern, lightweight C# Windows Forms application designed to route audio via **VB-Cable** to **three audio devices simultaneously** with millisecond-precision delay synchronization, independent volume controls, and real-time Windows master volume linking.
 
 ---
 
@@ -20,16 +20,16 @@ SoundPair requires the **VB-Cable Virtual Audio Driver** to function correctly a
 
 - When you launch SoundPair for the first time, if VB-Cable is missing, the app will automatically prompt you to download and open the installer.
 - Alternatively, you can download and install it manually from the official [VB-Audio website](https://vb-audio.com/Cable/).
-- Restart the PC.
+- **Restart the PC**.
 
 ### Step 2: Configure Windows Audio Output
 
 1. Open your Windows Sound Settings.
 2. Set **CABLE Input (VB-Audio Virtual Cable)** as your default playback device so your media streams cleanly into the application. This ensures unwanted system notification chimes stay silent.
 
-### Step 3: Connect Your Bluetooth Headsets
+### Step 3: Connect Your Audio Devices
 
-1. Turn on your Bluetooth headsets. SoundPair features automatic hardware detection and will instantly populate them in the dropdown menus (`Bluetooth Headset 1 (Base)` and `Bluetooth Headset 2 (Adjustable)`).
+1. Turn on your Bluetooth headsets. SoundPair features automatic hardware detection and will instantly populate them in the dropdown menus (`Device Slot 1 (Primary)`, `Device Slot 2 (Optional / Adjustable)` and `Device Slot 2 (Optional / Adjustable)`).
 2. Select your desired base headset and adjustable headset from the lists.
 
 ### Step 4: Fine-Tune Delay & Volume
