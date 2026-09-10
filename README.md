@@ -29,7 +29,7 @@ SoundPair requires the **VB-Cable Virtual Audio Driver** to function correctly a
 
 ### Step 3: Connect Your Audio Devices
 
-1. Turn on your Bluetooth headsets. SoundPair features automatic hardware detection and will instantly populate them in the dropdown menus (`Device Slot 1 (Primary)`, `Device Slot 2 (Optional / Adjustable)` and `Device Slot 2 (Optional / Adjustable)`).
+1. Turn on your Bluetooth headsets. SoundPair features automatic hardware detection and will instantly populate them in the dropdown menus (`Device Slot 1 (Primary)`, `Device Slot 2 (Optional / Adjustable)` and `Device Slot 3 (Optional / Adjustable)`).
 2. Select your desired base headset and adjustable headset from the lists.
 
 ### Step 4: Fine-Tune Delay & Volume
