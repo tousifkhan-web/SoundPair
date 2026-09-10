@@ -60,7 +60,7 @@ Click the **Start Streaming** button. The app will execute a quick Bluetooth war
 ## 🛠️ Tech Stack & Requirements
 
 - **Language:** C# 12 / .NET 10 (Windows-specific platform support)
-- **UI Framework:** Windows Forms (WinForms)
+- **UI Framework:** XAML and WPF (Windows Presentation Foundation)
 - **Audio Library:** NAudio (v3.x architecture)
 - **OS:** Windows 10 / 11 (64-bit)
 
