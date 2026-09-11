@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -26,28 +27,23 @@ namespace SoundPair
         private MMDevice? defaultRenderDevice;
         private bool isStreaming = false;
         private bool hasCheckedVbCable = false;
-        private DispatcherTimer devicePollTimer;
 
         private int delay2Ms = 0;
         private int delay3Ms = 0;
-        private const int BaseDelayMs = 200; // Baseline pre-buffer allowing negative relative delays
-
+        private const int BaseDelayMs = 200; 
         private const int WM_DEVICECHANGE = 0x0219;
+
+        private float cachedSysVol = 1.0f;
+
+        // Track the unique hardware IDs of active streams to handle partial disconnects safely
+        private string? activeId1, activeId2, activeId3;
+
+        private static readonly byte[] SilenceBuffer = new byte[1048576];
 
         public MainWindow()
         {
             InitializeComponent();
             LoadAudioDevices();
-
-            devicePollTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-            devicePollTimer.Tick += (s, e) =>
-            {
-                if (!isStreaming)
-                {
-                    RefreshDevicesIfNeeded();
-                }
-            };
-            devicePollTimer.Start();
         }
 
         protected override void OnSourceInitialized(EventArgs e)
@@ -61,7 +57,16 @@ namespace SoundPair
         {
             if (msg == WM_DEVICECHANGE)
             {
-                if (!isStreaming)
+                if (isStreaming)
+                {
+                    // NEW: Instead of stopping everything, carefully check which device dropped out
+                    Dispatcher.InvokeAsync(() => 
+                    {
+                        HandleDeviceChangeWhileStreaming();
+                        LoadAudioDevices(); // Refresh the UI in the background to show the device is gone
+                    });
+                }
+                else
                 {
                     LoadAudioDevices();
                 }
@@ -69,29 +74,46 @@ namespace SoundPair
             return IntPtr.Zero;
         }
 
-        private void RefreshDevicesIfNeeded()
+        // NEW FEATURE: Partial Disconnect Resilience 
+        private void HandleDeviceChangeWhileStreaming()
         {
             try
             {
                 using var enumerator = new MMDeviceEnumerator();
-                var currentDevices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
+                var activeEndpoints = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
 
-                if (devices == null || currentDevices.Count != devices.Count)
-                {
-                    LoadAudioDevices();
-                    return;
-                }
+                // Helper to check if a specific device ID is still active in Windows
+                bool IsAlive(string? id) => id != null && activeEndpoints.Any(d => d.ID == id);
 
-                for (int i = 0; i < currentDevices.Count; i++)
+                // Identify and kill only the streams that disconnected
+                if (activeId1 != null && !IsAlive(activeId1))
+                    KillStream(ref out1, ref buffer1, ref sampleChannel1, ref activeId1);
+                
+                if (activeId2 != null && !IsAlive(activeId2))
+                    KillStream(ref out2, ref buffer2, ref sampleChannel2, ref activeId2);
+                
+                if (activeId3 != null && !IsAlive(activeId3))
+                    KillStream(ref out3, ref buffer3, ref sampleChannel3, ref activeId3);
+
+                // If ALL streams have died/disconnected, shut down the entire app safely
+                if (out1 == null && out2 == null && out3 == null)
                 {
-                    if (currentDevices[i].FriendlyName != devices[i].FriendlyName)
-                    {
-                        LoadAudioDevices();
-                        break;
-                    }
+                    BtnStop_Click(null, null);
                 }
             }
             catch { }
+        }
+
+        // Safely disposes a specific dead stream without affecting the surviving ones
+        private void KillStream(ref WasapiPlayer? player, ref BufferedWaveProvider? buffer, ref SampleChannel? channel, ref string? activeId)
+        {
+            try { player?.Stop(); } catch { }
+            player?.Dispose();
+            
+            player = null;
+            buffer = null;
+            channel = null;
+            activeId = null;
         }
 
         private void LoadAudioDevices()
@@ -111,6 +133,8 @@ namespace SoundPair
                 comboDevice3.Items.Add("-- Disabled / Blank --");
 
                 using var enumerator = new MMDeviceEnumerator();
+                
+                devices?.Dispose(); 
                 devices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
                 
                 bool vbCableFound = false;
@@ -180,7 +204,8 @@ namespace SoundPair
                 }
 
                 lblStatus.Text = "Status: Extracting installer...";
-                ZipFile.ExtractToDirectory(zipPath, tempFolder);
+                
+                await Task.Run(() => ZipFile.ExtractToDirectory(zipPath, tempFolder));
 
                 lblStatus.Text = "Status: Waiting for installation...";
                 string installerName = Environment.Is64BitOperatingSystem ? "VBCABLE_Setup_x64.exe" : "VBCABLE_Setup.exe";
@@ -279,15 +304,29 @@ namespace SoundPair
                 lblStatus.Text = "Status: Initializing streams...";
                 lblStatus.Foreground = Brushes.Orange;
 
+                // Cache the device IDs so we can track partial disconnects later
+                activeId1 = dev1?.ID;
+                activeId2 = dev2?.ID;
+                activeId3 = dev3?.ID;
+
                 var dummyFormat = new WaveFormat(44100, 16, 2);
                 var dummyProv = new BufferedWaveProvider(dummyFormat);
                 byte[] silence = new byte[dummyFormat.AverageBytesPerSecond / 2];
                 dummyProv.AddSamples(silence, 0, silence.Length);
 
-                if (dev1 != null) { using var t = new WasapiPlayerBuilder().WithDevice(dev1).Build(); t.Init(dummyProv); t.Play(); }
-                if (dev2 != null) { using var t = new WasapiPlayerBuilder().WithDevice(dev2).Build(); t.Init(dummyProv); t.Play(); }
-                if (dev3 != null) { using var t = new WasapiPlayerBuilder().WithDevice(dev3).Build(); t.Init(dummyProv); t.Play(); }
+                var t1 = dev1 != null ? new WasapiPlayerBuilder().WithDevice(dev1).Build() : null;
+                var t2 = dev2 != null ? new WasapiPlayerBuilder().WithDevice(dev2).Build() : null;
+                var t3 = dev3 != null ? new WasapiPlayerBuilder().WithDevice(dev3).Build() : null;
+
+                if (t1 != null) { t1.Init(dummyProv); t1.Play(); }
+                if (t2 != null) { t2.Init(dummyProv); t2.Play(); }
+                if (t3 != null) { t3.Init(dummyProv); t3.Play(); }
+
                 await Task.Delay(300);
+
+                t1?.Dispose();
+                t2?.Dispose();
+                t3?.Dispose();
 
                 capture = new WasapiRecorderBuilder().WithLoopbackCapture().Build();
 
@@ -297,15 +336,24 @@ namespace SoundPair
 
                 ApplyDelays();
 
-                var b1 = buffer1; var b2 = buffer2; var b3 = buffer3;
+                byte[] transferBuffer = new byte[8192]; 
+
                 capture.DataAvailable += (buffer, flags, devicePosition, qpcPosition) =>
                 {
                     if (buffer.Length > 0)
                     {
-                        byte[] rawData = buffer.ToArray();
-                        b1?.AddSamples(rawData, 0, rawData.Length);
-                        b2?.AddSamples(rawData, 0, rawData.Length);
-                        b3?.AddSamples(rawData, 0, rawData.Length);
+                        if (transferBuffer.Length < buffer.Length) 
+                        {
+                            transferBuffer = new byte[buffer.Length];
+                        }
+                        
+                        buffer.CopyTo(transferBuffer); 
+
+                        // Notice we now directly reference the class variables (buffer1) instead of local variables (b1).
+                        // This allows KillStream() to safely cut off the data flow by setting them to null.
+                        buffer1?.AddSamples(transferBuffer, 0, buffer.Length);
+                        buffer2?.AddSamples(transferBuffer, 0, buffer.Length);
+                        buffer3?.AddSamples(transferBuffer, 0, buffer.Length);
                     }
                 };
 
@@ -324,6 +372,9 @@ namespace SoundPair
 
                 using var enumerator = new MMDeviceEnumerator();
                 defaultRenderDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                
+                try { cachedSysVol = defaultRenderDevice.AudioEndpointVolume.MasterVolumeLevelScalar; } catch { }
+                
                 defaultRenderDevice.AudioEndpointVolume.OnVolumeNotification += OnSystemVolumeNotification;
 
                 ApplySystemAndAppVolumes();
@@ -346,6 +397,7 @@ namespace SoundPair
 
         private void OnSystemVolumeNotification(AudioVolumeNotificationData data)
         {
+            cachedSysVol = data.MasterVolume;
             Dispatcher.Invoke(() => ApplySystemAndAppVolumes());
         }
 
@@ -356,6 +408,7 @@ namespace SoundPair
             lblVol1Val.Text = $"{(int)sliderVol1.Value}%";
             lblVol2Val.Text = $"{(int)sliderVol2.Value}%";
             lblVol3Val.Text = $"{(int)sliderVol3.Value}%";
+            
             ApplySystemAndAppVolumes();
         }
 
@@ -366,21 +419,29 @@ namespace SoundPair
             delay2Ms = (int)sliderDelay2.Value;
             delay3Ms = (int)sliderDelay3.Value;
             
-            // Format labels with explicit + or - signs for clarity
             lblDelay2Val.Text = (delay2Ms > 0 ? $"+{delay2Ms}" : $"{delay2Ms}") + " ms";
             lblDelay3Val.Text = (delay3Ms > 0 ? $"+{delay3Ms}" : $"{delay3Ms}") + " ms";
             
             ApplyDelays();
         }
 
+        private void LblDelay_Reset_Click(object sender, MouseButtonEventArgs e)
+        {
+            if (sender == lblDelay2Val)
+            {
+                sliderDelay2.Value = 0;
+            }
+            else if (sender == lblDelay3Val)
+            {
+                sliderDelay3.Value = 0;
+            }
+        }
+
         private void ApplySystemAndAppVolumes()
         {
-            float sysVol = 1.0f;
-            try { if (defaultRenderDevice != null) sysVol = defaultRenderDevice.AudioEndpointVolume.MasterVolumeLevelScalar; } catch { }
-
-            if (sampleChannel1 != null) sampleChannel1.Volume = sysVol * ((float)sliderVol1.Value / 100f);
-            if (sampleChannel2 != null) sampleChannel2.Volume = sysVol * ((float)sliderVol2.Value / 100f);
-            if (sampleChannel3 != null) sampleChannel3.Volume = sysVol * ((float)sliderVol3.Value / 100f);
+            if (sampleChannel1 != null) sampleChannel1.Volume = cachedSysVol * ((float)sliderVol1.Value / 100f);
+            if (sampleChannel2 != null) sampleChannel2.Volume = cachedSysVol * ((float)sliderVol2.Value / 100f);
+            if (sampleChannel3 != null) sampleChannel3.Volume = cachedSysVol * ((float)sliderVol3.Value / 100f);
         }
 
         private void ApplyDelays()
@@ -389,7 +450,6 @@ namespace SoundPair
             int blockAlign = capture.WaveFormat.BlockAlign;
             int bps = capture.WaveFormat.AverageBytesPerSecond / 1000;
 
-            // Apply base delay to slot 1, and offset slots 2 & 3 relative to it
             ApplyBufferDelay(buffer1, BaseDelayMs, bps, blockAlign);
             ApplyBufferDelay(buffer2, BaseDelayMs + delay2Ms, bps, blockAlign);
             ApplyBufferDelay(buffer3, BaseDelayMs + delay3Ms, bps, blockAlign);
@@ -403,36 +463,36 @@ namespace SoundPair
             {
                 int bytesNeeded = bps * delayMs;
                 bytesNeeded -= bytesNeeded % blockAlign;
-                if (bytesNeeded > 0)
+                
+                if (bytesNeeded > 0 && bytesNeeded <= SilenceBuffer.Length)
                 {
-                    buf.AddSamples(new byte[bytesNeeded], 0, bytesNeeded);
+                    buf.AddSamples(SilenceBuffer, 0, bytesNeeded);
                 }
             }
         }
 
         private void BtnStop_Click(object? sender, RoutedEventArgs? e)
         {
-            try
+            if (defaultRenderDevice != null)
             {
-                if (defaultRenderDevice != null)
-                {
-                    defaultRenderDevice.AudioEndpointVolume.OnVolumeNotification -= OnSystemVolumeNotification;
-                    defaultRenderDevice.Dispose();
-                    defaultRenderDevice = null;
-                }
-
-                capture?.StopRecording(); 
-                out1?.Stop(); out2?.Stop(); out3?.Stop();
-
-                capture?.Dispose(); capture = null;
-                out1?.Dispose(); out1 = null;
-                out2?.Dispose(); out2 = null;
-                out3?.Dispose(); out3 = null;
-
-                buffer1 = buffer2 = buffer3 = null;
-                sampleChannel1 = sampleChannel2 = sampleChannel3 = null;
+                defaultRenderDevice.AudioEndpointVolume.OnVolumeNotification -= OnSystemVolumeNotification;
+                defaultRenderDevice.Dispose();
+                defaultRenderDevice = null;
             }
-            catch { }
+
+            try { capture?.StopRecording(); } catch { }
+            try { out1?.Stop(); } catch { }
+            try { out2?.Stop(); } catch { }
+            try { out3?.Stop(); } catch { }
+
+            capture?.Dispose(); capture = null;
+            out1?.Dispose(); out1 = null;
+            out2?.Dispose(); out2 = null;
+            out3?.Dispose(); out3 = null;
+
+            buffer1 = buffer2 = buffer3 = null;
+            sampleChannel1 = sampleChannel2 = sampleChannel3 = null;
+            activeId1 = activeId2 = activeId3 = null;
 
             isStreaming = false;
             btnStart.IsEnabled = true;
@@ -447,8 +507,12 @@ namespace SoundPair
 
         protected override void OnClosed(EventArgs e)
         {
-            devicePollTimer?.Stop();
+            var helper = new WindowInteropHelper(this);
+            HwndSource.FromHwnd(helper.Handle)?.RemoveHook(HwndHook);
+
             BtnStop_Click(null, null);
+            devices?.Dispose(); 
+
             base.OnClosed(e);
         }
     }

@@ -2,11 +2,12 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Sound Pair - Tri-Device Audio Streamer" 
-        SizeToContent="Height" Width="420" 
+        MinWidth="420" MinHeight="550"
+        Width="460" SizeToContent="Height"
         WindowStartupLocation="CenterScreen"
         Background="#12161F"
         FontFamily="Segoe UI"
-        ResizeMode="CanMinimize">
+        ResizeMode="CanResize">
 
     <Window.Resources>
         <!-- Color Palette -->
@@ -109,101 +110,103 @@
         </Style>
     </Window.Resources>
 
-    <StackPanel Margin="15">
-        
-        <!-- Header -->
-        <Border CornerRadius="10" Margin="0,0,0,15" Padding="15">
-            <Border.Background>
-                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                    <GradientStop Color="#735FE6" Offset="0"/>
-                    <GradientStop Color="#DC4B8C" Offset="1"/>
-                </LinearGradientBrush>
-            </Border.Background>
-            <StackPanel>
-                <TextBlock Text="Sound Pair (Tri Mode)" FontSize="20" FontWeight="Bold" Foreground="White"/>
-                <TextBlock Text="Stream system audio to up to 3 flexible outputs" FontSize="13" Foreground="#E6E6FA" Margin="0,2,0,0"/>
-            </StackPanel>
-        </Border>
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="15">
+            
+            <!-- Header -->
+            <Border CornerRadius="10" Margin="0,0,0,15" Padding="15">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                        <GradientStop Color="#735FE6" Offset="0"/>
+                        <GradientStop Color="#DC4B8C" Offset="1"/>
+                    </LinearGradientBrush>
+                </Border.Background>
+                <StackPanel>
+                    <TextBlock Text="Sound Pair (Tri Mode)" FontSize="20" FontWeight="Bold" Foreground="White"/>
+                    <TextBlock Text="Stream system audio to up to 3 flexible outputs" FontSize="13" Foreground="#E6E6FA" Margin="0,2,0,0"/>
+                </StackPanel>
+            </Border>
 
-        <!-- Card 1: Devices -->
-        <Border Style="{StaticResource CardStyle}">
-            <StackPanel>
-                <TextBlock Text="Device Slot 1 (Primary):" Foreground="{StaticResource TextSec}"/>
-                <ComboBox x:Name="comboDevice1"/>
+            <!-- Card 1: Devices -->
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel>
+                    <TextBlock Text="Device Slot 1 (Primary):" Foreground="{StaticResource TextSec}"/>
+                    <ComboBox x:Name="comboDevice1"/>
 
-                <TextBlock Text="Device Slot 2 (Optional / Adjustable):" Foreground="{StaticResource TextSec}"/>
-                <ComboBox x:Name="comboDevice2"/>
+                    <TextBlock Text="Device Slot 2 (Optional / Adjustable):" Foreground="{StaticResource TextSec}"/>
+                    <ComboBox x:Name="comboDevice2"/>
 
-                <TextBlock Text="Device Slot 3 (Optional / Adjustable):" Foreground="{StaticResource TextSec}"/>
-                <ComboBox x:Name="comboDevice3" Margin="0,4,0,0"/>
-            </StackPanel>
-        </Border>
+                    <TextBlock Text="Device Slot 3 (Optional / Adjustable):" Foreground="{StaticResource TextSec}"/>
+                    <ComboBox x:Name="comboDevice3" Margin="0,4,0,0"/>
+                </StackPanel>
+            </Border>
 
-        <!-- Card 2: Controls -->
-        <Border Style="{StaticResource CardStyle}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="60"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="55"/>
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-
-                <TextBlock Grid.Row="0" Grid.Column="0" Text="Vol 1:" Foreground="{StaticResource TextSec}" VerticalAlignment="Center"/>
-                <Slider Grid.Row="0" Grid.Column="1" x:Name="sliderVol1" Maximum="100" Value="100" Margin="10,8" ValueChanged="SliderVol_ValueChanged"/>
-                <TextBlock Grid.Row="0" Grid.Column="2" x:Name="lblVol1Val" Text="100%" Foreground="{StaticResource Highlight}" TextAlignment="Right" VerticalAlignment="Center"/>
-
-                <TextBlock Grid.Row="1" Grid.Column="0" Text="Vol 2:" Foreground="{StaticResource TextSec}" VerticalAlignment="Center"/>
-                <Slider Grid.Row="1" Grid.Column="1" x:Name="sliderVol2" Maximum="100" Value="100" Margin="10,8" ValueChanged="SliderVol_ValueChanged"/>
-                <TextBlock Grid.Row="1" Grid.Column="2" x:Name="lblVol2Val" Text="100%" Foreground="{StaticResource Highlight}" TextAlignment="Right" VerticalAlignment="Center"/>
-
-                <!-- Delay 2: Centered at 0, spans -200 to +200 -->
-                <TextBlock Grid.Row="2" Grid.Column="0" Text="Delay 2:" Foreground="{StaticResource TextSec}" VerticalAlignment="Center"/>
-                <Slider Grid.Row="2" Grid.Column="1" x:Name="sliderDelay2" Minimum="-200" Maximum="200" Value="0" Margin="10,8" ValueChanged="SliderDelay_ValueChanged"/>
-                <TextBlock Grid.Row="2" Grid.Column="2" x:Name="lblDelay2Val" Text="0 ms" Foreground="{StaticResource Highlight}" TextAlignment="Right" VerticalAlignment="Center"/>
-
-                <TextBlock Grid.Row="3" Grid.Column="0" Text="Vol 3:" Foreground="{StaticResource TextSec}" VerticalAlignment="Center"/>
-                <Slider Grid.Row="3" Grid.Column="1" x:Name="sliderVol3" Maximum="100" Value="100" Margin="10,8" ValueChanged="SliderVol_ValueChanged"/>
-                <TextBlock Grid.Row="3" Grid.Column="2" x:Name="lblVol3Val" Text="100%" Foreground="{StaticResource Highlight}" TextAlignment="Right" VerticalAlignment="Center"/>
-
-                <!-- Delay 3: Centered at 0, spans -200 to +200 -->
-                <TextBlock Grid.Row="4" Grid.Column="0" Text="Delay 3:" Foreground="{StaticResource TextSec}" VerticalAlignment="Center"/>
-                <Slider Grid.Row="4" Grid.Column="1" x:Name="sliderDelay3" Minimum="-200" Maximum="200" Value="0" Margin="10,8" ValueChanged="SliderDelay_ValueChanged"/>
-                <TextBlock Grid.Row="4" Grid.Column="2" x:Name="lblDelay3Val" Text="0 ms" Foreground="{StaticResource Highlight}" TextAlignment="Right" VerticalAlignment="Center"/>
-            </Grid>
-        </Border>
-
-        <!-- Card 3: Actions -->
-        <Border Style="{StaticResource CardStyle}" Padding="15" Margin="0">
-            <StackPanel>
-                <Grid Margin="0,0,0,10">
+            <!-- Card 2: Controls -->
+            <Border Style="{StaticResource CardStyle}">
+                <Grid>
                     <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="60"/>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="10"/>
-                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="55"/>
                     </Grid.ColumnDefinitions>
-                    
-                    <Button Grid.Column="0" x:Name="btnStart" Content="Start Streaming" Height="40" BorderThickness="0" Click="BtnStart_Click" Style="{StaticResource DarkButton}">
-                        <Button.Background>
-                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                <GradientStop Color="#735FE6" Offset="0"/>
-                                <GradientStop Color="#DC4B8C" Offset="1"/>
-                            </LinearGradientBrush>
-                        </Button.Background>
-                    </Button>
-                    
-                    <Button Grid.Column="2" x:Name="btnStop" Content="Stop" Height="40" Background="#283040" Foreground="#6E788C" BorderThickness="0" IsEnabled="False" Click="BtnStop_Click" Style="{StaticResource DarkButton}"/>
-                </Grid>
-                
-                <TextBlock x:Name="lblStatus" Text="Status: Ready" Foreground="{StaticResource TextSec}" FontSize="12"/>
-            </StackPanel>
-        </Border>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
 
-    </StackPanel>
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Vol 1:" Foreground="{StaticResource TextSec}" VerticalAlignment="Center"/>
+                    <Slider Grid.Row="0" Grid.Column="1" x:Name="sliderVol1" Maximum="100" Value="100" Margin="10,8" ValueChanged="SliderVol_ValueChanged"/>
+                    <TextBlock Grid.Row="0" Grid.Column="2" x:Name="lblVol1Val" Text="100%" Foreground="{StaticResource Highlight}" TextAlignment="Right" VerticalAlignment="Center"/>
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Vol 2:" Foreground="{StaticResource TextSec}" VerticalAlignment="Center"/>
+                    <Slider Grid.Row="1" Grid.Column="1" x:Name="sliderVol2" Maximum="100" Value="100" Margin="10,8" ValueChanged="SliderVol_ValueChanged"/>
+                    <TextBlock Grid.Row="1" Grid.Column="2" x:Name="lblVol2Val" Text="100%" Foreground="{StaticResource Highlight}" TextAlignment="Right" VerticalAlignment="Center"/>
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Delay 2:" Foreground="{StaticResource TextSec}" VerticalAlignment="Center"/>
+                    <Slider Grid.Row="2" Grid.Column="1" x:Name="sliderDelay2" Minimum="-200" Maximum="200" Value="0" Margin="10,8" ValueChanged="SliderDelay_ValueChanged"/>
+                    <!-- Clickable Delay Label -->
+                    <TextBlock Grid.Row="2" Grid.Column="2" x:Name="lblDelay2Val" Text="0 ms" Foreground="{StaticResource Highlight}" TextAlignment="Right" VerticalAlignment="Center" Cursor="Hand" ToolTip="Click to reset to 0" MouseLeftButtonDown="LblDelay_Reset_Click"/>
+
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Vol 3:" Foreground="{StaticResource TextSec}" VerticalAlignment="Center"/>
+                    <Slider Grid.Row="3" Grid.Column="1" x:Name="sliderVol3" Maximum="100" Value="100" Margin="10,8" ValueChanged="SliderVol_ValueChanged"/>
+                    <TextBlock Grid.Row="3" Grid.Column="2" x:Name="lblVol3Val" Text="100%" Foreground="{StaticResource Highlight}" TextAlignment="Right" VerticalAlignment="Center"/>
+
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Delay 4:" Foreground="{StaticResource TextSec}" VerticalAlignment="Center"/>
+                    <Slider Grid.Row="4" Grid.Column="1" x:Name="sliderDelay3" Minimum="-200" Maximum="200" Value="0" Margin="10,8" ValueChanged="SliderDelay_ValueChanged"/>
+                    <!-- Clickable Delay Label -->
+                    <TextBlock Grid.Row="4" Grid.Column="2" x:Name="lblDelay3Val" Text="0 ms" Foreground="{StaticResource Highlight}" TextAlignment="Right" VerticalAlignment="Center" Cursor="Hand" ToolTip="Click to reset to 0" MouseLeftButtonDown="LblDelay_Reset_Click"/>
+                </Grid>
+            </Border>
+
+            <!-- Card 3: Actions -->
+            <Border Style="{StaticResource CardStyle}" Padding="15" Margin="0">
+                <StackPanel>
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="10"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        
+                        <Button Grid.Column="0" x:Name="btnStart" Content="Start Streaming" Height="40" BorderThickness="0" Click="BtnStart_Click" Style="{StaticResource DarkButton}">
+                            <Button.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                    <GradientStop Color="#735FE6" Offset="0"/>
+                                    <GradientStop Color="#DC4B8C" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Button.Background>
+                        </Button>
+                        
+                        <Button Grid.Column="2" x:Name="btnStop" Content="Stop" Height="40" Background="#283040" Foreground="#6E788C" BorderThickness="0" IsEnabled="False" Click="BtnStop_Click" Style="{StaticResource DarkButton}"/>
+                    </Grid>
+                    
+                    <TextBlock x:Name="lblStatus" Text="Status: Ready" Foreground="{StaticResource TextSec}" FontSize="12"/>
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
 </Window>
