@@ -30,7 +30,7 @@ namespace SoundPair
 
         private int delay2Ms = 0;
         private int delay3Ms = 0;
-        private const int BaseDelayMs = 200; 
+        private const int BaseDelayMs = 10; 
         private const int WM_DEVICECHANGE = 0x0219;
 
         private float cachedSysVol = 1.0f;
