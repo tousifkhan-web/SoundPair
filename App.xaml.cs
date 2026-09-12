@@ -4,16 +4,17 @@ using System.Windows;
 
 namespace SoundPair
 {
-    public partial class App : Application
+    public partial class App : System.Windows.Application
     {
         private static Mutex? _mutex;
+        private static bool _ownsMutex;
 
         protected override void OnStartup(StartupEventArgs e)
         {
             const string mutexName = "{SoundPair-Tri-Audio-Unique-Lock}";
-            _mutex = new Mutex(true, mutexName, out bool createdNew);
+            _mutex = new Mutex(true, mutexName, out _ownsMutex);
 
-            if (!createdNew)
+            if (!_ownsMutex)
             {
                 MessageBox.Show(
                     "Sound Pair is already running in the background!\n\nPlease check your Windows taskbar.",
@@ -30,7 +31,11 @@ namespace SoundPair
 
         protected override void OnExit(ExitEventArgs e)
         {
-            _mutex?.ReleaseMutex();
+            if (_ownsMutex)
+            {
+                _mutex?.ReleaseMutex();
+            }
+            
             base.OnExit(e);
         }
     }

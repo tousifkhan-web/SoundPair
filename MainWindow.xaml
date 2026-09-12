@@ -167,7 +167,7 @@
                     <TextBlock Grid.Row="1" Grid.Column="2" x:Name="lblVol2Val" Text="100%" Foreground="{StaticResource Highlight}" TextAlignment="Right" VerticalAlignment="Center"/>
 
                     <TextBlock Grid.Row="2" Grid.Column="0" Text="Delay 2:" Foreground="{StaticResource TextSec}" VerticalAlignment="Center"/>
-                    <Slider Grid.Row="2" Grid.Column="1" x:Name="sliderDelay2" Minimum="-200" Maximum="200" Value="0" Margin="10,8" ValueChanged="SliderDelay_ValueChanged"/>
+                    <Slider Grid.Row="2" Grid.Column="1" x:Name="sliderDelay2" Minimum="0" Maximum="200" Value="0" Margin="10,8" ValueChanged="SliderDelay_ValueChanged"/>
                     <!-- Clickable Delay Label -->
                     <TextBlock Grid.Row="2" Grid.Column="2" x:Name="lblDelay2Val" Text="0 ms" Foreground="{StaticResource Highlight}" TextAlignment="Right" VerticalAlignment="Center" Cursor="Hand" ToolTip="Click to reset to 0" MouseLeftButtonDown="LblDelay_Reset_Click"/>
 
@@ -175,8 +175,8 @@
                     <Slider Grid.Row="3" Grid.Column="1" x:Name="sliderVol3" Maximum="100" Value="100" Margin="10,8" ValueChanged="SliderVol_ValueChanged"/>
                     <TextBlock Grid.Row="3" Grid.Column="2" x:Name="lblVol3Val" Text="100%" Foreground="{StaticResource Highlight}" TextAlignment="Right" VerticalAlignment="Center"/>
 
-                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Delay 4:" Foreground="{StaticResource TextSec}" VerticalAlignment="Center"/>
-                    <Slider Grid.Row="4" Grid.Column="1" x:Name="sliderDelay3" Minimum="-200" Maximum="200" Value="0" Margin="10,8" ValueChanged="SliderDelay_ValueChanged"/>
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Delay 3:" Foreground="{StaticResource TextSec}" VerticalAlignment="Center"/>
+                    <Slider Grid.Row="4" Grid.Column="1" x:Name="sliderDelay3" Minimum="0" Maximum="200" Value="0" Margin="10,8" ValueChanged="SliderDelay_ValueChanged"/>
                     <!-- Clickable Delay Label -->
                     <TextBlock Grid.Row="4" Grid.Column="2" x:Name="lblDelay3Val" Text="0 ms" Foreground="{StaticResource Highlight}" TextAlignment="Right" VerticalAlignment="Center" Cursor="Hand" ToolTip="Click to reset to 0" MouseLeftButtonDown="LblDelay_Reset_Click"/>
                 </Grid>

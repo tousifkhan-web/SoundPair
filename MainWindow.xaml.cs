@@ -27,6 +27,7 @@ namespace SoundPair
         private MMDevice? defaultRenderDevice;
         private bool isStreaming = false;
         private bool hasCheckedVbCable = false;
+        private bool isInitialLoad = true;
 
         private int delay2Ms = 0;
         private int delay3Ms = 0;
@@ -37,14 +38,77 @@ namespace SoundPair
         private string? activeId1, activeId2, activeId3;
         private string? originalDefaultDeviceId = null;
 
+        private System.Windows.Forms.NotifyIcon? notifyIcon;
+        private DispatcherTimer? debounceTimer;
         private static readonly byte[] SilenceBuffer = new byte[1048576];
 
         public MainWindow()
         {
             InitializeComponent();
+            InitializeTrayIcon();
             SaveOriginalDefaultDevice();
             SetVBCableAsSystemDefault();
             LoadAudioDevices();
+        }
+
+        private void InitializeTrayIcon()
+        {
+            notifyIcon = new System.Windows.Forms.NotifyIcon();
+            try
+            {
+                var iconStream = System.Windows.Application.GetResourceStream(new Uri("SoundPair.ico", UriKind.Relative))?.Stream;
+                if (iconStream != null)
+                {
+                    notifyIcon.Icon = new System.Drawing.Icon(iconStream);
+                }
+                else
+                {
+                    notifyIcon.Icon = System.Drawing.SystemIcons.Application;
+                }
+            }
+            catch
+            {
+                notifyIcon.Icon = System.Drawing.SystemIcons.Application;
+            }
+
+            notifyIcon.Text = "Sound Pair";
+            notifyIcon.Visible = false;
+            notifyIcon.MouseClick += (s, e) =>
+            {
+                if (e.Button == System.Windows.Forms.MouseButtons.Left)
+                {
+                    RestoreFromTray();
+                }
+            };
+
+            var contextMenu = new System.Windows.Forms.ContextMenuStrip();
+            contextMenu.Items.Add("Open", null, (s, e) => RestoreFromTray());
+            contextMenu.Items.Add("Exit", null, (s, e) => Close());
+            notifyIcon.ContextMenuStrip = contextMenu;
+        }
+
+        protected override void OnStateChanged(EventArgs e)
+        {
+            base.OnStateChanged(e);
+            if (WindowState == WindowState.Minimized)
+            {
+                this.Hide();
+                if (notifyIcon != null)
+                {
+                    notifyIcon.Visible = true;
+                }
+            }
+        }
+
+        private void RestoreFromTray()
+        {
+            this.Show();
+            this.WindowState = WindowState.Normal;
+            this.Activate();
+            if (notifyIcon != null)
+            {
+                notifyIcon.Visible = false;
+            }
         }
 
         private void SaveOriginalDefaultDevice()
@@ -101,18 +165,23 @@ namespace SoundPair
         {
             if (msg == WM_DEVICECHANGE)
             {
-                if (isStreaming)
+                if (debounceTimer == null)
                 {
-                    Dispatcher.InvokeAsync(() => 
+                    debounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+                    debounceTimer.Tick += (s, args) =>
                     {
-                        HandleDeviceChangeWhileStreaming();
-                        LoadAudioDevices(); 
-                    });
+                        debounceTimer.Stop();
+                        
+                        if (isStreaming)
+                        {
+                            HandleDeviceChangeWhileStreaming();
+                        }
+                        LoadAudioDevices();
+                    };
                 }
-                else
-                {
-                    LoadAudioDevices();
-                }
+                
+                debounceTimer.Stop();
+                debounceTimer.Start();
             }
             return IntPtr.Zero;
         }
@@ -191,9 +260,11 @@ namespace SoundPair
                     }
                 }
 
-                SelectDeviceByName(comboDevice1, selectedName1, devices, devices.Count > 0 ? 1 : 0);
+                SelectDeviceByName(comboDevice1, selectedName1, devices, isInitialLoad && devices.Count > 0 ? 1 : 0);
                 SelectDeviceByName(comboDevice2, selectedName2, devices, 0);
                 SelectDeviceByName(comboDevice3, selectedName3, devices, 0);
+                
+                isInitialLoad = false;
 
                 if (!vbCableFound && !hasCheckedVbCable)
                 {
@@ -227,7 +298,7 @@ namespace SoundPair
             btnStart.IsEnabled = false;
 
             string zipUrl = "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip";
-            string tempFolder = Path.Combine(Path.GetTempPath(), "SoundPair_VBCable");
+            string tempFolder = Path.Combine(Path.GetTempPath(), "SoundPair_VBCable_" + Guid.NewGuid().ToString());
             string zipPath = Path.Combine(tempFolder, "vbcable.zip");
 
             try
@@ -314,13 +385,11 @@ namespace SoundPair
             return devices[cb.SelectedIndex - 1];
         }
 
-        // Bluetooth Cold-Start Sync Fix: Wakes up A2DP radios before streaming
         private async Task ExecuteBluetoothHardwareHandshake(MMDevice? dev1, MMDevice? dev2, MMDevice? dev3)
         {
             var dummyFormat = new WaveFormat(44100, 16, 2);
             var dummyProv = new BufferedWaveProvider(dummyFormat);
             
-            // Provide 2 seconds of silence to ensure deeply sleeping devices wake up entirely
             byte[] silence = new byte[dummyFormat.AverageBytesPerSecond * 2];
             dummyProv.AddSamples(silence, 0, silence.Length);
 
@@ -334,7 +403,6 @@ namespace SoundPair
                 if (t2 != null) { t2.Init(dummyProv); t2.Play(); }
                 if (t3 != null) { t3.Init(dummyProv); t3.Play(); }
 
-                // Hold the silent stream open for 1.2 seconds to force the Bluetooth handshake
                 await Task.Delay(1200);
             }
             finally
@@ -387,7 +455,6 @@ namespace SoundPair
                 isStreaming = true;
                 btnStart.IsEnabled = false;
 
-                // Fire the automated handshake sequence
                 lblStatus.Text = "Status: Waking up Bluetooth radios...";
                 lblStatus.Foreground = Brushes.Orange;
                 await ExecuteBluetoothHardwareHandshake(dev1, dev2, dev3);
@@ -422,9 +489,9 @@ namespace SoundPair
 
                         bool needsResync = false;
 
-                        int target1 = BaseDelayMs * bps;
-                        int target2 = (BaseDelayMs + delay2Ms) * bps;
-                        int target3 = (BaseDelayMs + delay3Ms) * bps;
+                        int target1 = Math.Max(0, BaseDelayMs * bps);
+                        int target2 = Math.Max(0, (BaseDelayMs + delay2Ms) * bps);
+                        int target3 = Math.Max(0, (BaseDelayMs + delay3Ms) * bps);
 
                         if (buffer1 != null && Math.Abs(buffer1.BufferedBytes - target1) > driftTolerance) needsResync = true;
                         if (buffer2 != null && Math.Abs(buffer2.BufferedBytes - target2) > driftTolerance) needsResync = true;
@@ -513,8 +580,8 @@ namespace SoundPair
             delay2Ms = (int)sliderDelay2.Value;
             delay3Ms = (int)sliderDelay3.Value;
             
-            lblDelay2Val.Text = (delay2Ms > 0 ? $"+{delay2Ms}" : $"{delay2Ms}") + " ms";
-            lblDelay3Val.Text = (delay3Ms > 0 ? $"+{delay3Ms}" : $"{delay3Ms}") + " ms";
+            lblDelay2Val.Text = $"{delay2Ms} ms";
+            lblDelay3Val.Text = $"{delay3Ms} ms";
             
             ApplyDelays();
         }
@@ -601,6 +668,14 @@ namespace SoundPair
 
         protected override void OnClosed(EventArgs e)
         {
+            if (notifyIcon != null)
+            {
+                notifyIcon.Visible = false;
+                notifyIcon.ContextMenuStrip?.Dispose();
+                notifyIcon.Dispose();
+                notifyIcon = null;
+            }
+
             if (!string.IsNullOrEmpty(originalDefaultDeviceId))
             {
                 SetSystemDefaultAudioDevice(originalDefaultDeviceId);

@@ -6,8 +6,15 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>SoundPair.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <!-- Add this ItemGroup to prevent global namespace collisions -->
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
   
   <ItemGroup>
     <None Remove="SoundPair.ico" />
