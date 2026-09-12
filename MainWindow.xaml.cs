@@ -34,16 +34,60 @@ namespace SoundPair
         private const int WM_DEVICECHANGE = 0x0219;
 
         private float cachedSysVol = 1.0f;
-
-        // Track the unique hardware IDs of active streams to handle partial disconnects safely
         private string? activeId1, activeId2, activeId3;
+        private string? originalDefaultDeviceId = null;
 
         private static readonly byte[] SilenceBuffer = new byte[1048576];
 
         public MainWindow()
         {
             InitializeComponent();
+            SaveOriginalDefaultDevice();
+            SetVBCableAsSystemDefault();
             LoadAudioDevices();
+        }
+
+        private void SaveOriginalDefaultDevice()
+        {
+            try
+            {
+                using var enumerator = new MMDeviceEnumerator();
+                using var defaultDev = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                originalDefaultDeviceId = defaultDev.ID;
+            }
+            catch { }
+        }
+
+        private void SetVBCableAsSystemDefault()
+        {
+            try
+            {
+                using var enumerator = new MMDeviceEnumerator();
+                var endpoints = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
+                
+                foreach (var device in endpoints)
+                {
+                    if (device.FriendlyName.Contains("CABLE Input", StringComparison.OrdinalIgnoreCase) || 
+                        device.FriendlyName.Contains("VB-Audio", StringComparison.OrdinalIgnoreCase))
+                    {
+                        SetSystemDefaultAudioDevice(device.ID);
+                        break;
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private void SetSystemDefaultAudioDevice(string deviceId)
+        {
+            try
+            {
+                var policyConfig = (IPolicyConfig)new PolicyConfigClient();
+                policyConfig.SetDefaultEndpoint(deviceId, Role.Multimedia);
+                policyConfig.SetDefaultEndpoint(deviceId, Role.Console);
+                policyConfig.SetDefaultEndpoint(deviceId, Role.Communications);
+            }
+            catch { }
         }
 
         protected override void OnSourceInitialized(EventArgs e)
@@ -59,11 +103,10 @@ namespace SoundPair
             {
                 if (isStreaming)
                 {
-                    // NEW: Instead of stopping everything, carefully check which device dropped out
                     Dispatcher.InvokeAsync(() => 
                     {
                         HandleDeviceChangeWhileStreaming();
-                        LoadAudioDevices(); // Refresh the UI in the background to show the device is gone
+                        LoadAudioDevices(); 
                     });
                 }
                 else
@@ -74,7 +117,6 @@ namespace SoundPair
             return IntPtr.Zero;
         }
 
-        // NEW FEATURE: Partial Disconnect Resilience 
         private void HandleDeviceChangeWhileStreaming()
         {
             try
@@ -82,10 +124,8 @@ namespace SoundPair
                 using var enumerator = new MMDeviceEnumerator();
                 var activeEndpoints = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
 
-                // Helper to check if a specific device ID is still active in Windows
                 bool IsAlive(string? id) => id != null && activeEndpoints.Any(d => d.ID == id);
 
-                // Identify and kill only the streams that disconnected
                 if (activeId1 != null && !IsAlive(activeId1))
                     KillStream(ref out1, ref buffer1, ref sampleChannel1, ref activeId1);
                 
@@ -95,7 +135,6 @@ namespace SoundPair
                 if (activeId3 != null && !IsAlive(activeId3))
                     KillStream(ref out3, ref buffer3, ref sampleChannel3, ref activeId3);
 
-                // If ALL streams have died/disconnected, shut down the entire app safely
                 if (out1 == null && out2 == null && out3 == null)
                 {
                     BtnStop_Click(null, null);
@@ -104,7 +143,6 @@ namespace SoundPair
             catch { }
         }
 
-        // Safely disposes a specific dead stream without affecting the surviving ones
         private void KillStream(ref WasapiPlayer? player, ref BufferedWaveProvider? buffer, ref SampleChannel? channel, ref string? activeId)
         {
             try { player?.Stop(); } catch { }
@@ -188,7 +226,7 @@ namespace SoundPair
             lblStatus.Foreground = Brushes.Orange;
             btnStart.IsEnabled = false;
 
-            string zipUrl = "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack43.zip";
+            string zipUrl = "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip";
             string tempFolder = Path.Combine(Path.GetTempPath(), "SoundPair_VBCable");
             string zipPath = Path.Combine(tempFolder, "vbcable.zip");
 
@@ -276,6 +314,40 @@ namespace SoundPair
             return devices[cb.SelectedIndex - 1];
         }
 
+        // Bluetooth Cold-Start Sync Fix: Wakes up A2DP radios before streaming
+        private async Task ExecuteBluetoothHardwareHandshake(MMDevice? dev1, MMDevice? dev2, MMDevice? dev3)
+        {
+            var dummyFormat = new WaveFormat(44100, 16, 2);
+            var dummyProv = new BufferedWaveProvider(dummyFormat);
+            
+            // Provide 2 seconds of silence to ensure deeply sleeping devices wake up entirely
+            byte[] silence = new byte[dummyFormat.AverageBytesPerSecond * 2];
+            dummyProv.AddSamples(silence, 0, silence.Length);
+
+            var t1 = dev1 != null ? new WasapiPlayerBuilder().WithDevice(dev1).Build() : null;
+            var t2 = dev2 != null ? new WasapiPlayerBuilder().WithDevice(dev2).Build() : null;
+            var t3 = dev3 != null ? new WasapiPlayerBuilder().WithDevice(dev3).Build() : null;
+
+            try 
+            {
+                if (t1 != null) { t1.Init(dummyProv); t1.Play(); }
+                if (t2 != null) { t2.Init(dummyProv); t2.Play(); }
+                if (t3 != null) { t3.Init(dummyProv); t3.Play(); }
+
+                // Hold the silent stream open for 1.2 seconds to force the Bluetooth handshake
+                await Task.Delay(1200);
+            }
+            finally
+            {
+                try { t1?.Stop(); } catch { }
+                try { t2?.Stop(); } catch { }
+                try { t3?.Stop(); } catch { }
+                t1?.Dispose();
+                t2?.Dispose();
+                t3?.Dispose();
+            }
+        }
+
         private async void BtnStart_Click(object sender, RoutedEventArgs e)
         {
             if (isStreaming) return;
@@ -297,36 +369,33 @@ namespace SoundPair
                 return;
             }
 
+            using (var tempEnumerator = new MMDeviceEnumerator())
+            {
+                var currentDefault = tempEnumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                if (currentDefault != null)
+                {
+                    if (dev1?.ID == currentDefault.ID || dev2?.ID == currentDefault.ID || dev3?.ID == currentDefault.ID)
+                    {
+                        MessageBox.Show("Feedback Loop Detected!\n\nYou are routing audio back into the Default System Device. This causes a metallic echoing loop.\n\nPlease set your Windows taskbar audio output to 'VB-Cable', then select your real headsets in SoundPair.", "Routing Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        return;
+                    }
+                }
+            }
+
             try
             {
                 isStreaming = true;
                 btnStart.IsEnabled = false;
-                lblStatus.Text = "Status: Initializing streams...";
-                lblStatus.Foreground = Brushes.Orange;
 
-                // Cache the device IDs so we can track partial disconnects later
+                // Fire the automated handshake sequence
+                lblStatus.Text = "Status: Waking up Bluetooth radios...";
+                lblStatus.Foreground = Brushes.Orange;
+                await ExecuteBluetoothHardwareHandshake(dev1, dev2, dev3);
+
+                lblStatus.Text = "Status: Initializing streams...";
                 activeId1 = dev1?.ID;
                 activeId2 = dev2?.ID;
                 activeId3 = dev3?.ID;
-
-                var dummyFormat = new WaveFormat(44100, 16, 2);
-                var dummyProv = new BufferedWaveProvider(dummyFormat);
-                byte[] silence = new byte[dummyFormat.AverageBytesPerSecond / 2];
-                dummyProv.AddSamples(silence, 0, silence.Length);
-
-                var t1 = dev1 != null ? new WasapiPlayerBuilder().WithDevice(dev1).Build() : null;
-                var t2 = dev2 != null ? new WasapiPlayerBuilder().WithDevice(dev2).Build() : null;
-                var t3 = dev3 != null ? new WasapiPlayerBuilder().WithDevice(dev3).Build() : null;
-
-                if (t1 != null) { t1.Init(dummyProv); t1.Play(); }
-                if (t2 != null) { t2.Init(dummyProv); t2.Play(); }
-                if (t3 != null) { t3.Init(dummyProv); t3.Play(); }
-
-                await Task.Delay(300);
-
-                t1?.Dispose();
-                t2?.Dispose();
-                t3?.Dispose();
 
                 capture = new WasapiRecorderBuilder().WithLoopbackCapture().Build();
 
@@ -337,6 +406,8 @@ namespace SoundPair
                 ApplyDelays();
 
                 byte[] transferBuffer = new byte[8192]; 
+                int bps = capture.WaveFormat.AverageBytesPerSecond / 1000;
+                int driftTolerance = bps * 40; 
 
                 capture.DataAvailable += (buffer, flags, devicePosition, qpcPosition) =>
                 {
@@ -349,11 +420,26 @@ namespace SoundPair
                         
                         buffer.CopyTo(transferBuffer); 
 
-                        // Notice we now directly reference the class variables (buffer1) instead of local variables (b1).
-                        // This allows KillStream() to safely cut off the data flow by setting them to null.
-                        buffer1?.AddSamples(transferBuffer, 0, buffer.Length);
-                        buffer2?.AddSamples(transferBuffer, 0, buffer.Length);
-                        buffer3?.AddSamples(transferBuffer, 0, buffer.Length);
+                        bool needsResync = false;
+
+                        int target1 = BaseDelayMs * bps;
+                        int target2 = (BaseDelayMs + delay2Ms) * bps;
+                        int target3 = (BaseDelayMs + delay3Ms) * bps;
+
+                        if (buffer1 != null && Math.Abs(buffer1.BufferedBytes - target1) > driftTolerance) needsResync = true;
+                        if (buffer2 != null && Math.Abs(buffer2.BufferedBytes - target2) > driftTolerance) needsResync = true;
+                        if (buffer3 != null && Math.Abs(buffer3.BufferedBytes - target3) > driftTolerance) needsResync = true;
+
+                        if (needsResync)
+                        {
+                            ApplyDelays();
+                        }
+                        else
+                        {
+                            buffer1?.AddSamples(transferBuffer, 0, buffer.Length);
+                            buffer2?.AddSamples(transferBuffer, 0, buffer.Length);
+                            buffer3?.AddSamples(transferBuffer, 0, buffer.Length);
+                        }
                     }
                 };
 
@@ -365,17 +451,25 @@ namespace SoundPair
                 if (dev2 != null && sampleChannel2 != null) { out2 = new WasapiPlayerBuilder().WithDevice(dev2).Build(); out2.Init(sampleChannel2); }
                 if (dev3 != null && sampleChannel3 != null) { out3 = new WasapiPlayerBuilder().WithDevice(dev3).Build(); out3.Init(sampleChannel3); }
 
+                out1?.Play(); 
+                out2?.Play(); 
+                out3?.Play();
+
+                await Task.Delay(50);
                 capture.StartRecording();
-                await Task.Delay(100);
 
-                out1?.Play(); out2?.Play(); out3?.Play();
-
-                using var enumerator = new MMDeviceEnumerator();
-                defaultRenderDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-                
-                try { cachedSysVol = defaultRenderDevice.AudioEndpointVolume.MasterVolumeLevelScalar; } catch { }
-                
-                defaultRenderDevice.AudioEndpointVolume.OnVolumeNotification += OnSystemVolumeNotification;
+                try 
+                {
+                    using var enumerator = new MMDeviceEnumerator();
+                    defaultRenderDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                    
+                    if (defaultRenderDevice != null)
+                    {
+                        cachedSysVol = defaultRenderDevice.AudioEndpointVolume.MasterVolumeLevelScalar;
+                        defaultRenderDevice.AudioEndpointVolume.OnVolumeNotification += OnSystemVolumeNotification;
+                    }
+                } 
+                catch { }
 
                 ApplySystemAndAppVolumes();
 
@@ -507,6 +601,11 @@ namespace SoundPair
 
         protected override void OnClosed(EventArgs e)
         {
+            if (!string.IsNullOrEmpty(originalDefaultDeviceId))
+            {
+                SetSystemDefaultAudioDevice(originalDefaultDeviceId);
+            }
+
             var helper = new WindowInteropHelper(this);
             HwndSource.FromHwnd(helper.Handle)?.RemoveHook(HwndHook);
 
@@ -515,5 +614,28 @@ namespace SoundPair
 
             base.OnClosed(e);
         }
+    }
+
+    [ComImport]
+    [Guid("870AF99C-171D-4F9E-AF0D-E63DF40C2BC9")]
+    internal class PolicyConfigClient { }
+
+    [ComImport]
+    [Guid("F8679F50-850A-41CF-9C72-430F290290C8")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IPolicyConfig
+    {
+        int GetMixFormat([MarshalAs(UnmanagedType.LPWStr)] string pszDeviceName, out IntPtr ppFormat);
+        int GetDeviceFormat([MarshalAs(UnmanagedType.LPWStr)] string pszDeviceName, int bDefault, out IntPtr ppFormat);
+        int ResetDeviceFormat([MarshalAs(UnmanagedType.LPWStr)] string pszDeviceName);
+        int SetDeviceFormat([MarshalAs(UnmanagedType.LPWStr)] string pszDeviceName, IntPtr pEndpointFormat, IntPtr mixFormat);
+        int GetProcessingPeriod([MarshalAs(UnmanagedType.LPWStr)] string pszDeviceName, int bDefault, out IntPtr pmftDefaultPeriod, out IntPtr pmftMinimumPeriod);
+        int SetProcessingPeriod([MarshalAs(UnmanagedType.LPWStr)] string pszDeviceName, IntPtr pmftPeriod);
+        int GetShareMode([MarshalAs(UnmanagedType.LPWStr)] string pszDeviceName, out IntPtr pMode);
+        int SetShareMode([MarshalAs(UnmanagedType.LPWStr)] string pszDeviceName, IntPtr mode);
+        int GetPropertyValue([MarshalAs(UnmanagedType.LPWStr)] string pszDeviceName, int bFxStore, IntPtr key, out IntPtr pv);
+        int SetPropertyValue([MarshalAs(UnmanagedType.LPWStr)] string pszDeviceName, int bFxStore, IntPtr key, IntPtr pv);
+        int SetDefaultEndpoint([MarshalAs(UnmanagedType.LPWStr)] string pszDeviceName, Role eRole);
+        int SetEndpointVisibility([MarshalAs(UnmanagedType.LPWStr)] string pszDeviceName, int bVisible);
     }
 }
