@@ -158,7 +158,21 @@ namespace SoundPair
         {
             base.OnSourceInitialized(e);
             var helper = new WindowInteropHelper(this);
+            
+            // Force Windows 11 Dark Title Bar
+            ApplyDarkTitleBar(helper.Handle);
+            
             HwndSource.FromHwnd(helper.Handle)?.AddHook(HwndHook);
+        }
+
+        private void ApplyDarkTitleBar(IntPtr hwnd)
+        {
+            int useImmersiveDarkMode = 1;
+            int hr = DwmSetWindowAttribute(hwnd, 20, ref useImmersiveDarkMode, sizeof(int));
+            if (hr != 0) 
+            {
+                DwmSetWindowAttribute(hwnd, 19, ref useImmersiveDarkMode, sizeof(int));
+            }
         }
 
         private IntPtr HwndHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -689,6 +703,9 @@ namespace SoundPair
 
             base.OnClosed(e);
         }
+        
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
     }
 
     [ComImport]

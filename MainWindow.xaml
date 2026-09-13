@@ -6,31 +6,31 @@
         MinWidth="420" MinHeight="550"
         Width="460" SizeToContent="Height"
         WindowStartupLocation="CenterScreen"
-        Background="#12161F"
-        FontFamily="Segoe UI"
+        Background="#202020"
+        FontFamily="Segoe UI Variable, Segoe UI, sans-serif"
         ResizeMode="CanResize">
 
     <Window.Resources>
-        <!-- Color Palette -->
-        <SolidColorBrush x:Key="CardBg" Color="#1A202C"/>
-        <SolidColorBrush x:Key="CardBorder" Color="#2D3748"/>
-        <SolidColorBrush x:Key="TextSec" Color="#828CA0"/>
-        <SolidColorBrush x:Key="Highlight" Color="#50AAFF"/>
-        <SolidColorBrush x:Key="DarkInputBg" Color="#232B3A"/>
-        <SolidColorBrush x:Key="DarkInputBorder" Color="#3E4C63"/>
+        <!-- Windows 11 Dark Mode Color Palette -->
+        <SolidColorBrush x:Key="CardBg" Color="#2D2D2D"/>
+        <SolidColorBrush x:Key="CardBorder" Color="#404040"/>
+        <SolidColorBrush x:Key="TextSec" Color="#A0A0A0"/>
+        <SolidColorBrush x:Key="Highlight" Color="#60CDFF"/>
+        <SolidColorBrush x:Key="DarkInputBg" Color="#333333"/>
+        <SolidColorBrush x:Key="DarkInputBorder" Color="#454545"/>
 
         <!-- Generic Text Style -->
         <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#F0F4F8"/>
+            <Setter Property="Foreground" Value="#FFFFFF"/>
             <Setter Property="FontSize" Value="13"/>
         </Style>
 
         <!-- True Dark Mode ComboBox -->
         <Style TargetType="ComboBox">
             <Setter Property="Margin" Value="0,4,0,12"/>
-            <Setter Property="Height" Value="28"/>
+            <Setter Property="Height" Value="32"/>
             <Setter Property="FontSize" Value="13"/>
-            <Setter Property="Foreground" Value="#F0F4F8"/>
+            <Setter Property="Foreground" Value="#FFFFFF"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ComboBox">
@@ -39,14 +39,14 @@
                                 <ToggleButton.Template>
                                     <ControlTemplate TargetType="ToggleButton">
                                         <Border Background="{StaticResource DarkInputBg}" BorderBrush="{StaticResource DarkInputBorder}" BorderThickness="1" CornerRadius="4">
-                                            <Path x:Name="Arrow" Fill="#F0F4F8" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0" Data="M 0 0 L 4 4 L 8 0 Z"/>
+                                            <Path x:Name="Arrow" Fill="#FFFFFF" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0" Data="M 0 0 L 4 4 L 8 0 Z"/>
                                         </Border>
                                     </ControlTemplate>
                                 </ToggleButton.Template>
                             </ToggleButton>
                             <ContentPresenter x:Name="ContentSite" IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}" Margin="10,0,30,0" VerticalAlignment="Center"/>
                             <Popup x:Name="Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
-                                <Border x:Name="DropDownBorder" Background="{StaticResource DarkInputBg}" BorderThickness="1" BorderBrush="{StaticResource DarkInputBorder}" MinWidth="{TemplateBinding ActualWidth}" MaxHeight="150">
+                                <Border x:Name="DropDownBorder" Background="{StaticResource CardBg}" BorderThickness="1" BorderBrush="{StaticResource CardBorder}" CornerRadius="4" MinWidth="{TemplateBinding ActualWidth}" MaxHeight="150" Margin="0,4,0,0">
                                     <ScrollViewer SnapsToDevicePixels="True">
                                         <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained" />
                                     </ScrollViewer>
@@ -59,17 +59,18 @@
             <Setter Property="ItemContainerStyle">
                 <Setter.Value>
                     <Style TargetType="ComboBoxItem">
-                        <Setter Property="Foreground" Value="#F0F4F8"/>
-                        <Setter Property="Padding" Value="10,5"/>
+                        <Setter Property="Foreground" Value="#FFFFFF"/>
+                        <Setter Property="Padding" Value="10,6"/>
+                        <Setter Property="Margin" Value="4,2"/>
                         <Setter Property="Template">
                             <Setter.Value>
                                 <ControlTemplate TargetType="ComboBoxItem">
-                                    <Border x:Name="ItemBorder" Background="Transparent">
+                                    <Border x:Name="ItemBorder" Background="Transparent" CornerRadius="4">
                                         <ContentPresenter Margin="{TemplateBinding Padding}"/>
                                     </Border>
                                     <ControlTemplate.Triggers>
                                         <Trigger Property="IsHighlighted" Value="True">
-                                            <Setter TargetName="ItemBorder" Property="Background" Value="#313D52"/>
+                                            <Setter TargetName="ItemBorder" Property="Background" Value="#404040"/>
                                         </Trigger>
                                     </ControlTemplate.Triggers>
                                 </ControlTemplate>
@@ -83,12 +84,12 @@
         <!-- Custom Button Style -->
         <Style x:Key="DarkButton" TargetType="Button">
             <Setter Property="Foreground" Value="White"/>
-            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="FontSize" Value="14"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="Border" Background="{TemplateBinding Background}" CornerRadius="6">
+                        <Border x:Name="Border" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -105,7 +106,7 @@
             <Setter Property="Background" Value="{StaticResource CardBg}"/>
             <Setter Property="BorderBrush" Value="{StaticResource CardBorder}"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="CornerRadius" Value="8"/>
             <Setter Property="Padding" Value="15"/>
             <Setter Property="Margin" Value="0,0,0,10"/>
         </Style>
@@ -115,16 +116,16 @@
         <StackPanel Margin="15">
             
             <!-- Header -->
-            <Border CornerRadius="10" Margin="0,0,0,15" Padding="15">
+            <Border CornerRadius="8" Margin="0,0,0,15" Padding="15">
                 <Border.Background>
                     <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                        <GradientStop Color="#735FE6" Offset="0"/>
-                        <GradientStop Color="#DC4B8C" Offset="1"/>
+                        <GradientStop Color="#5A47C1" Offset="0"/>
+                        <GradientStop Color="#B2356B" Offset="1"/>
                     </LinearGradientBrush>
                 </Border.Background>
                 <StackPanel>
-                    <TextBlock Text="Sound Pair (Tri Mode)" FontSize="20" FontWeight="Bold" Foreground="White"/>
-                    <TextBlock Text="Stream system audio to up to 3 flexible outputs" FontSize="13" Foreground="#E6E6FA" Margin="0,2,0,0"/>
+                    <TextBlock Text="Sound Pair (Tri Mode)" FontSize="20" FontWeight="SemiBold" Foreground="White"/>
+                    <TextBlock Text="Stream system audio to up to 3 flexible outputs" FontSize="13" Foreground="#E0E0E0" Margin="0,2,0,0"/>
                 </StackPanel>
             </Border>
 
@@ -192,16 +193,15 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         
-                        <Button Grid.Column="0" x:Name="btnStart" Content="Start Streaming" Height="40" BorderThickness="0" Click="BtnStart_Click" Style="{StaticResource DarkButton}">
-                            <Button.Background>
-                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                    <GradientStop Color="#735FE6" Offset="0"/>
-                                    <GradientStop Color="#DC4B8C" Offset="1"/>
-                                </LinearGradientBrush>
-                            </Button.Background>
-                        </Button>
+                        <Button Grid.Column="0" x:Name="btnStart" Content="Start Streaming" Height="36" 
+                                BorderThickness="1" BorderBrush="#3A4354" 
+                                Background="{StaticResource Highlight}" Foreground="Black"
+                                Click="BtnStart_Click" Style="{StaticResource DarkButton}"/>
                         
-                        <Button Grid.Column="2" x:Name="btnStop" Content="Stop" Height="40" Background="#283040" Foreground="#6E788C" BorderThickness="0" IsEnabled="False" Click="BtnStop_Click" Style="{StaticResource DarkButton}"/>
+                        <Button Grid.Column="2" x:Name="btnStop" Content="Stop" Height="36" 
+                                Background="#333333" Foreground="#FFFFFF" BorderThickness="1" 
+                                BorderBrush="#454545" IsEnabled="False" Click="BtnStop_Click" 
+                                Style="{StaticResource DarkButton}"/>
                     </Grid>
                     
                     <TextBlock x:Name="lblStatus" Text="Status: Ready" Foreground="{StaticResource TextSec}" FontSize="12"/>
