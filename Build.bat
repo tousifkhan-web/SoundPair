@@ -5,7 +5,7 @@ echo ===================================================
 
 echo.
 echo [1/2] Building SoundPair_standalone (With .NET 10 Runtime)...
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:AssemblyName=SoundPair_standalone -o ./publish/standalone
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:AssemblyName=SoundPair_standalone -o ./publish/standalone -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
 
 if %errorlevel% neq 0 (
     echo.

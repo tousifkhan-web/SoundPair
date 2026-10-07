@@ -25,6 +25,11 @@ namespace SoundPair
 
         private MMDeviceCollection? devices;
         private MMDevice? defaultRenderDevice;
+        
+        // Added binding states for hardware volume sync
+        private MMDevice? boundDevice1, boundDevice2, boundDevice3;
+        private bool _isSyncingVolume1, _isSyncingVolume2, _isSyncingVolume3;
+
         private bool isStreaming = false;
         private bool hasCheckedVbCable = false;
         private bool isInitialLoad = true;
@@ -46,6 +51,11 @@ namespace SoundPair
         {
             InitializeComponent();
             InitializeTrayIcon();
+            
+            comboDevice1.SelectionChanged += ComboDevice1_SelectionChanged;
+            comboDevice2.SelectionChanged += ComboDevice2_SelectionChanged;
+            comboDevice3.SelectionChanged += ComboDevice3_SelectionChanged;
+
             SaveOriginalDefaultDevice();
             SetVBCableAsSystemDefault();
             LoadAudioDevices();
@@ -158,10 +168,7 @@ namespace SoundPair
         {
             base.OnSourceInitialized(e);
             var helper = new WindowInteropHelper(this);
-            
-            // Force Windows 11 Dark Title Bar
             ApplyDarkTitleBar(helper.Handle);
-            
             HwndSource.FromHwnd(helper.Handle)?.AddHook(HwndHook);
         }
 
@@ -237,6 +244,114 @@ namespace SoundPair
             activeId = null;
         }
 
+        // --- Hardware Device Binding Methods ---
+
+        private void UnbindAllDevices()
+        {
+            try { if (boundDevice1 != null) { boundDevice1.AudioEndpointVolume.OnVolumeNotification -= OnDevice1VolumeChanged; boundDevice1 = null; } } catch { boundDevice1 = null; }
+            try { if (boundDevice2 != null) { boundDevice2.AudioEndpointVolume.OnVolumeNotification -= OnDevice2VolumeChanged; boundDevice2 = null; } } catch { boundDevice2 = null; }
+            try { if (boundDevice3 != null) { boundDevice3.AudioEndpointVolume.OnVolumeNotification -= OnDevice3VolumeChanged; boundDevice3 = null; } } catch { boundDevice3 = null; }
+        }
+
+        private void BindDevice1(MMDevice? newDevice)
+        {
+            try { if (boundDevice1 != null) { boundDevice1.AudioEndpointVolume.OnVolumeNotification -= OnDevice1VolumeChanged; } } catch { }
+            boundDevice1 = newDevice;
+            if (boundDevice1 != null)
+            {
+                try 
+                {
+                    _isSyncingVolume1 = true;
+                    sliderVol1.Value = boundDevice1.AudioEndpointVolume.MasterVolumeLevelScalar * 100;
+                    lblVol1Val.Text = $"{(int)sliderVol1.Value}%";
+                    _isSyncingVolume1 = false;
+                    boundDevice1.AudioEndpointVolume.OnVolumeNotification += OnDevice1VolumeChanged;
+                } catch { }
+            }
+        }
+
+        private void BindDevice2(MMDevice? newDevice)
+        {
+            try { if (boundDevice2 != null) { boundDevice2.AudioEndpointVolume.OnVolumeNotification -= OnDevice2VolumeChanged; } } catch { }
+            boundDevice2 = newDevice;
+            if (boundDevice2 != null)
+            {
+                try 
+                {
+                    _isSyncingVolume2 = true;
+                    sliderVol2.Value = boundDevice2.AudioEndpointVolume.MasterVolumeLevelScalar * 100;
+                    lblVol2Val.Text = $"{(int)sliderVol2.Value}%";
+                    _isSyncingVolume2 = false;
+                    boundDevice2.AudioEndpointVolume.OnVolumeNotification += OnDevice2VolumeChanged;
+                } catch { }
+            }
+        }
+
+        private void BindDevice3(MMDevice? newDevice)
+        {
+            try { if (boundDevice3 != null) { boundDevice3.AudioEndpointVolume.OnVolumeNotification -= OnDevice3VolumeChanged; } } catch { }
+            boundDevice3 = newDevice;
+            if (boundDevice3 != null)
+            {
+                try 
+                {
+                    _isSyncingVolume3 = true;
+                    sliderVol3.Value = boundDevice3.AudioEndpointVolume.MasterVolumeLevelScalar * 100;
+                    lblVol3Val.Text = $"{(int)sliderVol3.Value}%";
+                    _isSyncingVolume3 = false;
+                    boundDevice3.AudioEndpointVolume.OnVolumeNotification += OnDevice3VolumeChanged;
+                } catch { }
+            }
+        }
+
+        private void OnDevice1VolumeChanged(AudioVolumeNotificationData data)
+        {
+            Dispatcher.InvokeAsync(() => {
+                double newVol = data.MasterVolume * 100;
+                if (Math.Abs(sliderVol1.Value - newVol) > 1.0)
+                {
+                    _isSyncingVolume1 = true;
+                    sliderVol1.Value = newVol;
+                    lblVol1Val.Text = $"{(int)newVol}%";
+                    _isSyncingVolume1 = false;
+                }
+            });
+        }
+        
+        private void OnDevice2VolumeChanged(AudioVolumeNotificationData data)
+        {
+            Dispatcher.InvokeAsync(() => {
+                double newVol = data.MasterVolume * 100;
+                if (Math.Abs(sliderVol2.Value - newVol) > 1.0)
+                {
+                    _isSyncingVolume2 = true;
+                    sliderVol2.Value = newVol;
+                    lblVol2Val.Text = $"{(int)newVol}%";
+                    _isSyncingVolume2 = false;
+                }
+            });
+        }
+        
+        private void OnDevice3VolumeChanged(AudioVolumeNotificationData data)
+        {
+            Dispatcher.InvokeAsync(() => {
+                double newVol = data.MasterVolume * 100;
+                if (Math.Abs(sliderVol3.Value - newVol) > 1.0)
+                {
+                    _isSyncingVolume3 = true;
+                    sliderVol3.Value = newVol;
+                    lblVol3Val.Text = $"{(int)newVol}%";
+                    _isSyncingVolume3 = false;
+                }
+            });
+        }
+
+        private void ComboDevice1_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) => BindDevice1(GetDeviceFromCombo(comboDevice1));
+        private void ComboDevice2_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) => BindDevice2(GetDeviceFromCombo(comboDevice2));
+        private void ComboDevice3_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) => BindDevice3(GetDeviceFromCombo(comboDevice3));
+
+        // -------------------------------------------
+
         private void LoadAudioDevices()
         {
             try
@@ -244,6 +359,12 @@ namespace SoundPair
                 string? selectedName1 = GetPureDeviceName(comboDevice1.SelectedItem?.ToString());
                 string? selectedName2 = GetPureDeviceName(comboDevice2.SelectedItem?.ToString());
                 string? selectedName3 = GetPureDeviceName(comboDevice3.SelectedItem?.ToString());
+
+                comboDevice1.SelectionChanged -= ComboDevice1_SelectionChanged;
+                comboDevice2.SelectionChanged -= ComboDevice2_SelectionChanged;
+                comboDevice3.SelectionChanged -= ComboDevice3_SelectionChanged;
+
+                UnbindAllDevices();
 
                 comboDevice1.Items.Clear();
                 comboDevice2.Items.Clear();
@@ -273,6 +394,10 @@ namespace SoundPair
                         vbCableFound = true;
                     }
                 }
+
+                comboDevice1.SelectionChanged += ComboDevice1_SelectionChanged;
+                comboDevice2.SelectionChanged += ComboDevice2_SelectionChanged;
+                comboDevice3.SelectionChanged += ComboDevice3_SelectionChanged;
 
                 SelectDeviceByName(comboDevice1, selectedName1, devices, isInitialLoad && devices.Count > 0 ? 1 : 0);
                 SelectDeviceByName(comboDevice2, selectedName2, devices, 0);
@@ -546,8 +671,15 @@ namespace SoundPair
                     
                     if (defaultRenderDevice != null)
                     {
-                        cachedSysVol = defaultRenderDevice.AudioEndpointVolume.MasterVolumeLevelScalar;
-                        defaultRenderDevice.AudioEndpointVolume.OnVolumeNotification += OnSystemVolumeNotification;
+                        try 
+                        {
+                            cachedSysVol = defaultRenderDevice.AudioEndpointVolume.MasterVolumeLevelScalar;
+                            defaultRenderDevice.AudioEndpointVolume.OnVolumeNotification += OnSystemVolumeNotification;
+                        }
+                        catch 
+                        {
+                            cachedSysVol = 1.0f; 
+                        }
                     }
                 } 
                 catch { }
@@ -579,12 +711,22 @@ namespace SoundPair
         private void SliderVol_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
             if (lblVol1Val == null || lblVol2Val == null || lblVol3Val == null) return; 
-            
-            lblVol1Val.Text = $"{(int)sliderVol1.Value}%";
-            lblVol2Val.Text = $"{(int)sliderVol2.Value}%";
-            lblVol3Val.Text = $"{(int)sliderVol3.Value}%";
-            
-            ApplySystemAndAppVolumes();
+
+            if (sender == sliderVol1 && !_isSyncingVolume1)
+            {
+                lblVol1Val.Text = $"{(int)sliderVol1.Value}%";
+                if (boundDevice1 != null) { try { float clampedVol = Math.Max(0.0f, Math.Min(1.0f, (float)(sliderVol1.Value / 100.0))); boundDevice1.AudioEndpointVolume.MasterVolumeLevelScalar = clampedVol; } catch { } }
+            }
+            else if (sender == sliderVol2 && !_isSyncingVolume2)
+            {
+                lblVol2Val.Text = $"{(int)sliderVol2.Value}%";
+                if (boundDevice2 != null) { try { float clampedVol = Math.Max(0.0f, Math.Min(1.0f, (float)(sliderVol2.Value / 100.0))); boundDevice2.AudioEndpointVolume.MasterVolumeLevelScalar = clampedVol; } catch { } }
+            }
+            else if (sender == sliderVol3 && !_isSyncingVolume3)
+            {
+                lblVol3Val.Text = $"{(int)sliderVol3.Value}%";
+                if (boundDevice3 != null) { try { float clampedVol = Math.Max(0.0f, Math.Min(1.0f, (float)(sliderVol3.Value / 100.0))); boundDevice3.AudioEndpointVolume.MasterVolumeLevelScalar = clampedVol; } catch { } }
+            }
         }
 
         private void SliderDelay_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -614,9 +756,9 @@ namespace SoundPair
 
         private void ApplySystemAndAppVolumes()
         {
-            if (sampleChannel1 != null) sampleChannel1.Volume = cachedSysVol * ((float)sliderVol1.Value / 100f);
-            if (sampleChannel2 != null) sampleChannel2.Volume = cachedSysVol * ((float)sliderVol2.Value / 100f);
-            if (sampleChannel3 != null) sampleChannel3.Volume = cachedSysVol * ((float)sliderVol3.Value / 100f);
+            if (sampleChannel1 != null) sampleChannel1.Volume = cachedSysVol;
+            if (sampleChannel2 != null) sampleChannel2.Volume = cachedSysVol;
+            if (sampleChannel3 != null) sampleChannel3.Volume = cachedSysVol;
         }
 
         private void ApplyDelays()
@@ -650,7 +792,7 @@ namespace SoundPair
         {
             if (defaultRenderDevice != null)
             {
-                defaultRenderDevice.AudioEndpointVolume.OnVolumeNotification -= OnSystemVolumeNotification;
+                try { defaultRenderDevice.AudioEndpointVolume.OnVolumeNotification -= OnSystemVolumeNotification; } catch { }
                 defaultRenderDevice.Dispose();
                 defaultRenderDevice = null;
             }
@@ -682,6 +824,8 @@ namespace SoundPair
 
         protected override void OnClosed(EventArgs e)
         {
+            UnbindAllDevices();
+
             if (notifyIcon != null)
             {
                 notifyIcon.Visible = false;
