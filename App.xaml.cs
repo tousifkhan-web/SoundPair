@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Windows;
 
@@ -11,8 +11,16 @@ namespace SoundPair
 
         protected override void OnStartup(StartupEventArgs e)
         {
-            const string mutexName = "{SoundPair-Tri-Audio-Unique-Lock}";
-            _mutex = new Mutex(true, mutexName, out _ownsMutex);
+            const string mutexName = @"Local\{SoundPair-Tri-Audio-Unique-Lock}";
+            try
+            {
+                _mutex = new Mutex(true, mutexName, out _ownsMutex);
+            }
+            catch (AbandonedMutexException)
+            {
+                // Prior instance terminated abnormally; current process now owns the mutex
+                _ownsMutex = true;
+            }
 
             if (!_ownsMutex)
             {
@@ -33,8 +41,14 @@ namespace SoundPair
         {
             if (_ownsMutex)
             {
-                _mutex?.ReleaseMutex();
+                try
+                {
+                    _mutex?.ReleaseMutex();
+                }
+                catch { }
             }
+            _mutex?.Dispose();
+            _mutex = null;
             
             base.OnExit(e);
         }
