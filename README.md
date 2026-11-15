@@ -6,7 +6,7 @@ A modern, high-performance C# WPF desktop application designed to route audio vi
 
 ## 📷 App Preview
 
-![SoundPair Screenshot](screenshot.png)
+![SoundPair Screenshot](screenshot1.png) ![SoundPair Screenshot 2](screenshot2.png)
 
 ---
 
@@ -25,6 +25,7 @@ SoundPair uses the **VB-Cable Virtual Audio Driver** to capture and isolate clea
 ### Step 2: Configure Windows Audio Output
 
 SoundPair handles audio routing smoothly:
+
 - **Automatic Configuration:** When started, SoundPair automatically sets **CABLE Input (VB-Audio Virtual Cable)** as your active Windows default playback device and saves your previous default output.
 - **Automatic Restoration:** When you exit SoundPair, it cleanly restores your original Windows default playback device.
 - **Manual Check (Optional):** If needed, you can verify in **Windows Sound Settings** that `CABLE Input (VB-Audio Virtual Cable)` is selected as the default output device.
@@ -93,6 +94,7 @@ Build.bat
 Or you can build via the .NET CLI:
 
 ### 1. Lightweight Build (Framework-Dependent)
+
 Produces a compact single-file executable. Requires the target machine to have the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) installed:
 
 ```bash
@@ -100,6 +102,7 @@ dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile
 ```
 
 ### 2. Standalone Build (Self-Contained)
+
 Bundles the complete .NET 10 runtime, native dependencies, and compression into a single self-extracting executable. Does not require any pre-installed .NET runtimes:
 
 ```bash
