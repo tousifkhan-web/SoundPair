@@ -3,6 +3,7 @@
 [Oo]bj/
 publish/
 driver/
+wpf_backup/
 
 # Visual Studio User Specific Files
 *.suo

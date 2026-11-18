@@ -1,6 +1,6 @@
 # SoundPair
 
-A modern, high-performance C# WPF desktop application designed to route audio via **VB-Cable** to **three audio devices simultaneously** with millisecond-precision delay synchronization, independent volume controls, visual calibration, and real-time Windows master volume linking.
+A modern, high-performance C# desktop application built with **Avalonia UI 11** designed to route audio via **Native Windows Process Loopback** (driver-free) to **up to three audio devices simultaneously** with millisecond-precision delay synchronization, independent volume controls, visual calibration, and real-time Windows master volume linking.
 
 ---
 
@@ -14,21 +14,15 @@ A modern, high-performance C# WPF desktop application designed to route audio vi
 
 Follow these simple steps to get SoundPair up and running from scratch:
 
-### Step 1: Install the Virtual Audio Driver
+### Step 1: Zero Driver Setup (Driver-Free)
 
-SoundPair uses the **VB-Cable Virtual Audio Driver** to capture and isolate clean media audio without recording notification pings or background noise.
+SoundPair utilizes **Native Windows 11 Process Loopback Capture** (`WithProcessLoopback`).
+- **No virtual audio cables, third-party drivers, or kernel drivers are required.**
+- Captures pre-mute system audio directly across all apps with zero configuration.
 
-- **Automatic Prompt:** When you launch SoundPair for the first time, if VB-Cable is missing, the application will automatically offer to download and launch the installer for you.
-- **Manual Installation:** Alternatively, download and install VB-Cable manually from the official [VB-Audio website](https://vb-audio.com/Cable/).
-- **Restart your PC** after installation so Windows registers the driver properly.
+### Step 2: Automatic Speaker Echo Cancellation
 
-### Step 2: Configure Windows Audio Output
-
-SoundPair handles audio routing smoothly:
-
-- **Automatic Configuration:** When started, SoundPair automatically sets **CABLE Input (VB-Audio Virtual Cable)** as your active Windows default playback device and saves your previous default output.
-- **Automatic Restoration:** When you exit SoundPair, it cleanly restores your original Windows default playback device.
-- **Manual Check (Optional):** If needed, you can verify in **Windows Sound Settings** that `CABLE Input (VB-Audio Virtual Cable)` is selected as the default output device.
+When streaming starts, SoundPair automatically silences your internal PC speakers to prevent local room echo while preserving full system audio loopback to your connected headphones and speakers. When you stop streaming or exit the app, your speaker's original state is seamlessly restored.
 
 ### Step 3: Connect & Select Your Audio Devices
 
@@ -41,9 +35,9 @@ SoundPair handles audio routing smoothly:
 
 ### Step 4: Calibrate & Fine-Tune Audio Delays
 
-- **Visual Calibration Studio (Ball Drop & Spacebar Sync):** Click **🎯 Visual Calibration Studio** (or the **🎯 Cal** button beside any device slot) to open the calibration drawer. Put on your headset, watch the ball drop down the chute, and tap the **[Spacebar]** the instant you hear the audio click. SoundPair averages your tap responses, filters statistical outliers, and automatically balances delay offsets across all active outputs.
+- **Visual Calibration Studio (Ball Drop & Spacebar Sync):** Click **🌐 Global Calibration** (or the **🎯 Cal** button beside any device slot) to open the calibration drawer. Put on your headset, watch the ball drop down the chute, and tap the **[Spacebar]** the instant you hear the audio click. SoundPair averages your tap responses, compensates for human reaction time, and automatically balances delay offsets across all active outputs.
 - **Persistent Device Profiles:** Calibrated delays are automatically saved to `device_profiles.json`. When you reconnect or select the same device in the future, SoundPair instantly recalls your calibration profile.
-- **Manual Delay Offset (0–300 ms):** Use the delay sliders for each slot to manually nudge or fine-tune synchronization. Click on any delay value label (e.g. `0 ms`) to instantly reset it back to 0 ms.
+- **Manual Delay Controls:** Use the `- 10 ms`, `+ 10 ms`, or direct numeric input box for each slot to manually nudge or fine-tune synchronization with zero slider limit constraints. Click the `↺ 0` button to instantly reset any slot back to 0 ms.
 - **Media Player Lip-Sync Offset:** When balancing outputs requires buffering, SoundPair calculates the exact audio-to-video delay compensation for video players (VLC, PotPlayer, MPC-HC) with one-click clipboard copying.
 - **Independent Volume Controls:** Adjust the dedicated volume sliders (0–100%) for each slot independently, or let them synchronize in real-time with your Windows master volume mixer and keyboard media keys.
 
@@ -56,30 +50,28 @@ Click the **Start Streaming** button. SoundPair executes a fast Bluetooth radio 
 ## ✨ Key Features
 
 - **Tri-Device Simultaneous Streaming:** Route Windows audio to up to 3 separate playback outputs (wired, USB, or Bluetooth) at the same time.
+- **Zero Drivers Required:** Native Windows 11 Process Loopback captures clean audio with zero extra software or virtual cables installed.
 - **Interactive Visual Calibration Studio:** Visual ball-drop animation with synchronized audio pulses and spacebar reaction timing. Eliminates unreliable microphone acoustic chirps and room noise interference.
 - **Persistent Device Profiles:** Automatically saves device latency profiles (`device_profiles.json`) and auto-loads balanced delay configurations whenever recognized devices are selected.
 - **Auto-Balanced Multi-Device Delay:** Intelligently identifies the slowest audio device, computes the required buffer padding for faster devices, and adjusts delay sliders automatically.
-- **Manual Millisecond Delay Sliders (0–300 ms):** Ultra-fine 0–300 ms adjustment per slot with a one-click reset to eliminate any echo or drift between disparate hardware models.
-- **Media Player Lip-Sync Offset:** Computes and displays the exact audio-to-video offset for VLC (`J`/`K`), PotPlayer (`Shift + >`/`<`), and MPC-HC with one-click clipboard copying.
+- **Manual Millisecond Delay Controls:** Stepper buttons (`- 10 ms`, `+ 10 ms`, `↺ 0`) and direct numeric millisecond input per slot to eliminate echo or drift between disparate hardware models without artificial range restrictions.
+- **Media Player Lip-Sync Offset:** Computes and displays the exact audio-to-video offset for VLC (`J`/`K`), PotPlayer (`Shift + >`/`<`), and MPC-HC (`Shift + +/-`) with one-click clipboard copying.
 - **Dynamic Sample-Rate Conversion (WDL Resampling):** Integrated NAudio `WdlResamplingSampleProvider` automatically converts and matches sample rates (e.g., 44.1 kHz, 48 kHz, 96 kHz) across mixed hardware without audio degradation or pitch glitches.
 - **Independent & Synchronized Volume Controls:** Dedicated volume percentage sliders for Device Slots 1, 2, and 3, linked bidirectionally with Windows endpoint volume notifications in real-time.
-- **Automated Default Device Management:** Automatically sets VB-Cable as the Windows default audio output on startup and seamlessly restores your original default audio device on exit.
-- **Feedback Loop & Routing Conflict Protection:** Detects if an output slot is mistakenly assigned to VB-Cable or the active Windows default endpoint, prompting the user and preventing dangerous audio feedback loops.
 - **Dynamic Hardware Detection:** Actively listens for Windows device arrival and removal events (`WM_DEVICECHANGE`) to refresh device lists dynamically without requiring an app restart.
 - **Bluetooth Cold-Start Warmup:** Runs a hardware handshake prior to streaming to wake up dormant Bluetooth radios, eliminating first-launch desync and buffer underruns.
 - **Minimize to System Tray:** Seamlessly minimizes to the Windows notification tray area with a right-click context menu (Open / Exit) to keep your workspace clutter-free.
 - **Single-Instance Enforcement:** Uses a system-wide named Mutex to ensure only one streaming instance runs at a time, preventing port and endpoint locks.
-- **Modern Glassmorphic Dark UI:** Sleek dark-mode aesthetic featuring deep navy containers, accent gradients, custom rounded cards, and native Windows 10/11 dark title bar support (`DwmSetWindowAttribute`).
+- **Modern Glassmorphic Dark UI:** Windows 11 Fluent Dark aesthetic with custom circular slider thumbs, card containers, smooth side drawer animations, and native dark title bar support (`DwmSetWindowAttribute`).
 
 ---
 
 ## 🛠️ Tech Stack & Requirements
 
 - **Language:** C# 12 / .NET 10 (Windows-specific platform support)
-- **UI Framework:** XAML & WPF (Windows Presentation Foundation)
-- **Audio Architecture:** NAudio 3.1.0 (WASAPI Loopback Capture & Low-Latency WasapiPlayer)
+- **UI Framework:** Avalonia UI 11 (High-Performance, Lightweight Desktop UI)
+- **Audio Architecture:** NAudio 3.1.0 (WASAPI Process Loopback Capture & Low-Latency WasapiPlayer)
 - **OS:** Windows 10 / Windows 11 (64-bit)
-- **Driver:** VB-Audio Virtual Cable
 
 ---
 
@@ -108,3 +100,19 @@ Bundles the complete .NET 10 runtime, native dependencies, and compression into 
 ```bash
 dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:AssemblyName=SoundPair_standalone -o ./publish/standalone -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
 ```
+
+---
+
+## 📜 License
+
+This project is licensed under the **PolyForm Noncommercial License 1.0.0**.
+
+* Free for personal use, research, hobby, education, and noncommercial organizations.
+* Commercial use, resale, or distribution requires explicit permission or a separate commercial agreement from the author.
+
+See [LICENSE.md](LICENSE.md) for full license terms and conditions.
+
+### Third-Party Libraries
+* [Avalonia UI](https://github.com/AvaloniaUI/Avalonia) - Licensed under the [MIT License](https://github.com/AvaloniaUI/Avalonia/blob/master/licence.md)
+* [NAudio](https://github.com/naudio/NAudio) - Licensed under the [MIT License](https://github.com/naudio/NAudio/blob/master/license.txt)
+

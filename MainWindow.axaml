@@ -1,0 +1,752 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        d:DesignWidth="470" d:DesignHeight="550"
+        x:Class="SoundPair.MainWindow"
+        Title="Sound Pair - Tri-Device Audio Streamer" 
+        Icon="/SoundPair.ico"
+        MinWidth="470" MinHeight="630"
+        Width="470" Height="630"
+        WindowStartupLocation="CenterScreen"
+        Background="#202020"
+        FontFamily="Segoe UI Variable, Segoe UI, Segoe UI Emoji, Inter, sans-serif"
+        CanResize="false">
+
+    <Window.Resources>
+        <!-- Windows 11 Dark Mode Color Palette -->
+        <SolidColorBrush x:Key="CardBg" Color="#2D2D2D"/>
+        <SolidColorBrush x:Key="CardBorder" Color="#404040"/>
+        <SolidColorBrush x:Key="TextSec" Color="#A0A0A0"/>
+        <SolidColorBrush x:Key="Highlight" Color="#60CDFF"/>
+        <SolidColorBrush x:Key="DarkInputBg" Color="#333333"/>
+        <SolidColorBrush x:Key="DarkInputBorder" Color="#454545"/>
+
+        <!-- Slider Custom Cyan ControlTheme: Windows 11 Circular Thumb (Aligned & Unclipped) -->
+        <ControlTheme x:Key="Windows11SliderTheme" TargetType="Slider">
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="MinHeight" Value="32"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Foreground" Value="{StaticResource Highlight}"/>
+            <Setter Property="ClipToBounds" Value="False"/>
+            <Setter Property="Template">
+                <ControlTemplate TargetType="Slider">
+                    <Grid Height="32" VerticalAlignment="Center" HorizontalAlignment="Stretch" ClipToBounds="False">
+                        <!-- Unfilled Track Background -->
+                        <Border Name="TrackBackground" Height="4" CornerRadius="2" 
+                                Background="#3E3E3E" VerticalAlignment="Center" HorizontalAlignment="Stretch" Margin="6,0" />
+
+                        <!-- Active Track & Draggable Thumb -->
+                        <Track Name="PART_Track" Orientation="Horizontal" 
+                               Height="32" VerticalAlignment="Center" HorizontalAlignment="Stretch" ClipToBounds="False"
+                               Minimum="{TemplateBinding Minimum}" 
+                               Maximum="{TemplateBinding Maximum}" 
+                               Value="{TemplateBinding Value, Mode=TwoWay}" 
+                               IsDirectionReversed="{TemplateBinding IsDirectionReversed}">
+                            <Track.DecreaseButton>
+                                <RepeatButton Name="PART_DecreaseButton" Focusable="False" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate>
+                                            <Grid Background="Transparent">
+                                                <Border Height="4" CornerRadius="2" Background="{StaticResource Highlight}" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                                            </Grid>
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.DecreaseButton>
+                            <Track.IncreaseButton>
+                                <RepeatButton Name="PART_IncreaseButton" Focusable="False" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate>
+                                            <Border Background="Transparent"/>
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.IncreaseButton>
+                            <Thumb Name="thumb" Width="24" Height="24" Margin="0" ClipToBounds="False">
+                                <Thumb.Template>
+                                    <ControlTemplate>
+                                        <Border Width="16" Height="16" CornerRadius="8" 
+                                                Background="{StaticResource Highlight}" 
+                                                BorderBrush="#FFFFFF" BorderThickness="2"
+                                                BoxShadow="0 1 4 0 #60000000"
+                                                HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </ControlTemplate>
+                                </Thumb.Template>
+                            </Thumb>
+                        </Track>
+                    </Grid>
+                </ControlTemplate>
+            </Setter>
+        </ControlTheme>
+    </Window.Resources>
+
+    <Window.Styles>
+        <!-- Generic Text Style -->
+        <Style Selector="TextBlock">
+            <Setter Property="Foreground" Value="#FFFFFF"/>
+            <Setter Property="FontSize" Value="12.5"/>
+        </Style>
+
+        <!-- True Dark Mode ComboBox -->
+        <Style Selector="ComboBox">
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="#FFFFFF"/>
+            <Setter Property="Background" Value="{StaticResource DarkInputBg}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource DarkInputBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="10,0,28,0"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+        </Style>
+        <Style Selector="ComboBox:pointerover /template/ Border#Background">
+            <Setter Property="Background" Value="#383838"/>
+            <Setter Property="BorderBrush" Value="#505050"/>
+        </Style>
+        <Style Selector="ComboBoxItem">
+            <Setter Property="Foreground" Value="#FFFFFF"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Padding" Value="10,6"/>
+        </Style>
+        <Style Selector="ComboBoxItem:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#3A3A3A"/>
+        </Style>
+        <Style Selector="ComboBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="#243447"/>
+            <Setter Property="Foreground" Value="{StaticResource Highlight}"/>
+        </Style>
+
+        <!-- Custom Dark Button Style -->
+        <Style Selector="Button.DarkButton">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Button.DarkButton:disabled">
+            <Setter Property="Opacity" Value="0.4"/>
+        </Style>
+
+        <!-- Icon / Square Button Style -->
+        <Style Selector="Button.IconButton">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="CornerRadius" Value="4"/>
+        </Style>
+        <Style Selector="Button.IconButton:pointerover">
+            <Setter Property="Background" Value="#3A3A3A"/>
+            <Setter Property="Foreground" Value="#FFFFFF"/>
+        </Style>
+
+        <!-- Card Container Style -->
+        <Style Selector="Border.CardStyle">
+            <Setter Property="Background" Value="{StaticResource CardBg}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource CardBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="14,12"/>
+            <Setter Property="Margin" Value="0,0,0,10"/>
+        </Style>
+
+        <!-- Slider Custom Cyan Styling: True Windows 11 Circular Thumb (Aligned & Unclipped) -->
+        <Style Selector="Slider">
+            <Setter Property="Theme" Value="{StaticResource Windows11SliderTheme}"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+        </Style>
+        <Style Selector="Slider /template/ Thumb:pointerover /template/ Border">
+            <Setter Property="Background" Value="#8CE0FF"/>
+            <Setter Property="Width" Value="18"/>
+            <Setter Property="Height" Value="18"/>
+            <Setter Property="CornerRadius" Value="9"/>
+        </Style>
+        <Style Selector="Slider /template/ Thumb:pressed /template/ Border">
+            <Setter Property="Background" Value="#38A9E6"/>
+            <Setter Property="Width" Value="14"/>
+            <Setter Property="Height" Value="14"/>
+            <Setter Property="CornerRadius" Value="7"/>
+        </Style>
+
+        <!-- CheckBox Custom Cyan Styling (Overrides System Accent) -->
+        <Style Selector="CheckBox">
+            <Setter Property="Foreground" Value="#D0D0D0"/>
+            <Setter Property="FontSize" Value="11"/>
+        </Style>
+        <Style Selector="CheckBox:checked /template/ Border#NormalRectangle">
+            <Setter Property="Background" Value="{StaticResource Highlight}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Highlight}"/>
+        </Style>
+        <Style Selector="CheckBox:checked /template/ Path#CheckGlyph">
+            <Setter Property="Fill" Value="#1E1E1E"/>
+        </Style>
+        <Style Selector="CheckBox:pointerover /template/ Border#NormalRectangle">
+            <Setter Property="BorderBrush" Value="#8CE0FF"/>
+        </Style>
+    </Window.Styles>
+
+    <Grid x:Name="RootLayoutGrid" ClipToBounds="True">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="470"/>
+            <ColumnDefinition Width="450"/>
+        </Grid.ColumnDefinitions>
+
+        <ScrollViewer Grid.Column="0" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="14,12">
+                
+                <!-- Header -->
+                <Border CornerRadius="8" Margin="0,0,0,10" Padding="14,12">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
+                            <GradientStop Color="#5A47C1" Offset="0"/>
+                            <GradientStop Color="#B2356B" Offset="1"/>
+                        </LinearGradientBrush>
+                    </Border.Background>
+                    <StackPanel>
+                        <TextBlock Text="Sound Pair (Tri Mode)" FontSize="17" FontWeight="SemiBold" Foreground="White"/>
+                        <TextBlock Text="Native cable-free system audio streaming to up to 3 outputs with zero echo" FontSize="12" Foreground="#E0E0E0" Margin="0,3,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Card 1: Devices & Calibration -->
+                <Border Classes="CardStyle">
+                    <StackPanel>
+                        <!-- Slot 1 -->
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="48"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="68"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Slot 1:" Foreground="{StaticResource TextSec}" VerticalAlignment="Center" FontSize="12.5" FontWeight="SemiBold"/>
+                            <ComboBox x:Name="comboDevice1" Grid.Column="1" Height="32"/>
+                            <Button x:Name="btnCalDevice1" Grid.Column="3" Height="32" 
+                                    Background="#383838" BorderBrush="#4A4A4A" BorderThickness="1"
+                                    Click="BtnCalDevice1_Click" Classes="DarkButton"
+                                    ToolTip.Tip="Calibrate latency for Device Slot 1">
+                                <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center">
+                                    <TextBlock Text="🎯" FontFamily="Segoe UI Emoji, Segoe UI Symbol, sans-serif" FontSize="11" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Cal" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+
+                        <!-- Slot 2 -->
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="48"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="68"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Slot 2:" Foreground="{StaticResource TextSec}" VerticalAlignment="Center" FontSize="12.5" FontWeight="SemiBold"/>
+                            <ComboBox x:Name="comboDevice2" Grid.Column="1" Height="32"/>
+                            <Button x:Name="btnCalDevice2" Grid.Column="3" Height="32" 
+                                    Background="#383838" BorderBrush="#4A4A4A" BorderThickness="1"
+                                    Click="BtnCalDevice2_Click" Classes="DarkButton"
+                                    ToolTip.Tip="Calibrate latency for Device Slot 2">
+                                <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center">
+                                    <TextBlock Text="🎯" FontFamily="Segoe UI Emoji, Segoe UI Symbol, sans-serif" FontSize="11" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Cal" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+
+                        <!-- Slot 3 -->
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="48"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="68"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Slot 3:" Foreground="{StaticResource TextSec}" VerticalAlignment="Center" FontSize="12.5" FontWeight="SemiBold"/>
+                            <ComboBox x:Name="comboDevice3" Grid.Column="1" Height="32"/>
+                            <Button x:Name="btnCalDevice3" Grid.Column="3" Height="32" 
+                                    Background="#383838" BorderBrush="#4A4A4A" BorderThickness="1"
+                                    Click="BtnCalDevice3_Click" Classes="DarkButton"
+                                    ToolTip.Tip="Calibrate latency for Device Slot 3">
+                                <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center">
+                                    <TextBlock Text="🎯" FontFamily="Segoe UI Emoji, Segoe UI Symbol, sans-serif" FontSize="11" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Cal" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+
+                        <!-- Master Global Calibration Button -->
+                        <Button x:Name="btnGlobalCalibrate" Height="36" 
+                                Background="#243447" BorderBrush="#354E6B" BorderThickness="1"
+                                Click="BtnGlobalCalibrate_Click" Classes="DarkButton" HorizontalAlignment="Stretch"
+                                ToolTip.Tip="Calibrate visual &amp; audio latency for all active outputs together">
+                            <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
+                                <TextBlock Text="🌐" FontFamily="Segoe UI Emoji, Segoe UI Symbol, sans-serif" FontSize="13" VerticalAlignment="Center"/>
+                                <TextBlock Text="Global Calibration (All Devices Sync)" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource Highlight}" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Border>
+
+                <!-- Card 2: Output Volumes -->
+                <Border Classes="CardStyle">
+                    <StackPanel>
+                        <TextBlock Text="Output Volumes" FontSize="13" FontWeight="SemiBold" Foreground="#FFFFFF" Margin="0,0,0,10"/>
+
+                        <!-- Volume Controls: Unified 3-row Grid to guarantee aligned percentage labels -->
+                        <Grid HorizontalAlignment="Stretch">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="48"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="48"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- Device 1 -->
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Vol 1:" Foreground="{StaticResource TextSec}" FontSize="12.5" VerticalAlignment="Center" Margin="0,3"/>
+                            <Slider Grid.Row="0" Grid.Column="1" x:Name="sliderVol1" HorizontalAlignment="Stretch" Minimum="0" Maximum="100" Value="100" VerticalAlignment="Center" ValueChanged="SliderVol_ValueChanged" Margin="0,3"/>
+                            <TextBlock Grid.Row="0" Grid.Column="3" x:Name="lblVol1Val" Text="100%" Foreground="{StaticResource Highlight}" FontSize="12.5" TextAlignment="Right" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,3"/>
+
+                            <!-- Device 2 -->
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Vol 2:" Foreground="{StaticResource TextSec}" FontSize="12.5" VerticalAlignment="Center" Margin="0,3"/>
+                            <Slider Grid.Row="1" Grid.Column="1" x:Name="sliderVol2" HorizontalAlignment="Stretch" Minimum="0" Maximum="100" Value="100" VerticalAlignment="Center" ValueChanged="SliderVol_ValueChanged" Margin="0,3"/>
+                            <TextBlock Grid.Row="1" Grid.Column="3" x:Name="lblVol2Val" Text="100%" Foreground="{StaticResource Highlight}" FontSize="12.5" TextAlignment="Right" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,3"/>
+
+                            <!-- Device 3 -->
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Vol 3:" Foreground="{StaticResource TextSec}" FontSize="12.5" VerticalAlignment="Center" Margin="0,3"/>
+                            <Slider Grid.Row="2" Grid.Column="1" x:Name="sliderVol3" HorizontalAlignment="Stretch" Minimum="0" Maximum="100" Value="100" VerticalAlignment="Center" ValueChanged="SliderVol_ValueChanged" Margin="0,3"/>
+                            <TextBlock Grid.Row="2" Grid.Column="3" x:Name="lblVol3Val" Text="100%" Foreground="{StaticResource Highlight}" FontSize="12.5" TextAlignment="Right" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,3"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- Card 3: Stream Control & Media Sync -->
+                <Border Classes="CardStyle" Margin="0">
+                    <StackPanel>
+                        <!-- Media Player Lip-Sync Offset Row -->
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="🎬" FontFamily="Segoe UI Emoji, Segoe UI Symbol, sans-serif" FontSize="13" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Media Lip-Sync Offset:" Foreground="{StaticResource TextSec}" FontSize="12.5" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="lblGlobalOffset" Text="0 ms" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource Highlight}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <TextBlock Text="• VLC: 'J' / 'K'  • PotPlayer: 'Shift + &gt;' / '&lt;'  • MPC-HC: 'Shift + +' / '-'" 
+                                           Foreground="#808080" FontSize="11" Margin="0,4,0,0"/>
+                            </StackPanel>
+
+                            <Button x:Name="btnCopyOffset" Grid.Column="1" Content="Copy Offset" Height="28" Padding="12,0" 
+                                    Background="#383838" Foreground="#FFFFFF" BorderBrush="#4A4A4A" BorderThickness="1"
+                                    Classes="DarkButton" Click="BtnCopyOffset_Click" VerticalAlignment="Center"
+                                    FontSize="12" ToolTip.Tip="Copy delay offset for media player sync (VLC, PotPlayer, MPC-HC)"/>
+                        </Grid>
+
+                        <!-- Divider -->
+                        <Border Height="1" Background="#383838" Margin="0,4,0,10"/>
+
+                        <!-- Stream Action Buttons -->
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="10"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            
+                            <Button Grid.Column="0" x:Name="btnStart" Content="Start Streaming" Height="36" 
+                                    BorderThickness="1" BorderBrush="#3A4354" 
+                                    Background="{StaticResource Highlight}" Foreground="Black"
+                                    Click="BtnStart_Click" Classes="DarkButton" FontSize="13" HorizontalAlignment="Stretch"/>
+                            
+                            <Button Grid.Column="2" x:Name="btnStop" Content="Stop" Height="36" 
+                                    Background="#333333" Foreground="#FFFFFF" BorderThickness="1" 
+                                    BorderBrush="#454545" IsEnabled="False" Click="BtnStop_Click" 
+                                    Classes="DarkButton" FontSize="13" HorizontalAlignment="Stretch"/>
+                        </Grid>
+                        
+                        <!-- Status Text -->
+                        <TextBlock x:Name="lblStatus" Text="Status: Ready" Foreground="{StaticResource TextSec}" FontSize="12" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Right Side Panel: Visual Calibration Studio -->
+        <Border Grid.Column="1" x:Name="borderSidePanel" Opacity="0.0"
+                Background="#1B1B1B" BorderBrush="#353535" BorderThickness="1,0,0,0" Width="450"
+                HorizontalAlignment="Left" ClipToBounds="True">
+            <Border.RenderTransform>
+                <TranslateTransform X="20"/>
+            </Border.RenderTransform>
+            <!-- All buttons in this panel are non-focusable so Space key is never consumed by a button click -->
+            <Border.Styles>
+                <Style Selector="Button">
+                    <Setter Property="Focusable" Value="False"/>
+                </Style>
+                <Style Selector="CheckBox">
+                    <Setter Property="Focusable" Value="False"/>
+                </Style>
+            </Border.Styles>
+            <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="12,8">
+                    
+                    <!-- Header with Close button -->
+                    <Grid Margin="0,0,0,5">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                <TextBlock Text="🎯" FontFamily="Segoe UI Emoji, Segoe UI Symbol, sans-serif" FontSize="13" VerticalAlignment="Center"/>
+                                <TextBlock Text="Calibration Studio" FontSize="14" FontWeight="SemiBold" Foreground="#60CDFF" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <TextBlock Text="Visual audio &amp; video latency sync" FontSize="11" Foreground="{StaticResource TextSec}" Margin="0,2,0,0"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" x:Name="btnCloseSidePanel" Content="✕" Width="26" Height="26"
+                                Background="#2A2A2A" Foreground="#CCCCCC" BorderBrush="#3C3C3C" BorderThickness="1"
+                                Click="BtnCloseSidePanel_Click" Classes="IconButton" FontSize="12"
+                                ToolTip.Tip="Close Side Panel"/>
+                    </Grid>
+
+                    <!-- Slot Selection Tabs (Global + 3 Slots) -->
+                    <Border Background="#252525" CornerRadius="5" BorderBrush="#383838" BorderThickness="1" Padding="2" Margin="0,0,0,5">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1.1*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0" x:Name="btnTabGlobal" Height="26" Click="BtnTabSlot_Click" Margin="1" Classes="DarkButton" Background="#243447" Foreground="{StaticResource Highlight}" FontSize="11.5" HorizontalAlignment="Stretch">
+                                <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center">
+                                    <TextBlock Text="🌐" FontFamily="Segoe UI Emoji, Segoe UI Symbol, sans-serif" FontSize="11" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Global" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Grid.Column="1" x:Name="btnTabSlot1" Content="Slot 1" Height="26" Click="BtnTabSlot_Click" Margin="1" Classes="DarkButton" Background="#2E2E2E" Foreground="#AAAAAA" FontSize="11.5" HorizontalAlignment="Stretch"/>
+                            <Button Grid.Column="2" x:Name="btnTabSlot2" Content="Slot 2" Height="26" Click="BtnTabSlot_Click" Margin="1" Classes="DarkButton" Background="#2E2E2E" Foreground="#AAAAAA" FontSize="11.5" HorizontalAlignment="Stretch"/>
+                            <Button Grid.Column="3" x:Name="btnTabSlot3" Content="Slot 3" Height="26" Click="BtnTabSlot_Click" Margin="1" Classes="DarkButton" Background="#2E2E2E" Foreground="#AAAAAA" FontSize="11.5" HorizontalAlignment="Stretch"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Active Calibrating Device Label (Compact Single Row) -->
+                    <Border Background="#232323" CornerRadius="5" Padding="8,4" Margin="0,0,0,5" BorderBrush="#333333" BorderThickness="1">
+                        <DockPanel LastChildFill="True">
+                            <TextBlock x:Name="lblCalModeHeader" Text="Target: " FontSize="11" Foreground="{StaticResource TextSec}" VerticalAlignment="Center" DockPanel.Dock="Left"/>
+                            <TextBlock x:Name="lblCalActiveDevice" Text="[None Selected]" FontSize="11.5" FontWeight="SemiBold" Foreground="#FFFFFF" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- Ball Drop Canvas Stage (Height 145px with unobstructed ball resting zone) -->
+                    <Border Background="#141414" CornerRadius="6" BorderBrush="#2E2E2E" BorderThickness="1" Height="145" Margin="0,0,0,5" ClipToBounds="True">
+                        <Grid>
+                            <!-- Countdown / Action Overlay Banner placed at top, leaving ball chute completely clear -->
+                            <Border x:Name="borderStagePrompt" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,5,0,0" 
+                                    Background="#E0222222" CornerRadius="4" Padding="12,3" BorderBrush="#404040" BorderThickness="1">
+                                <TextBlock x:Name="lblStagePrompt" Text="Click 'Start Drop' or press [Spacebar] to calibrate!" FontSize="11" Foreground="#E0E0E0" TextAlignment="Center"/>
+                            </Border>
+
+                            <!-- Vertical drop chute background -->
+                            <Canvas x:Name="canvasDropStage" Width="420" Height="145" Focusable="True">
+                                <!-- Chute rail guide centered at X=210, starting at Top=30 below prompt banner -->
+                                <Rectangle Canvas.Left="192" Canvas.Top="30" Width="36" Height="86" RadiusX="6" RadiusY="6" Fill="#1E1E1E" Stroke="#2D2D2D" StrokeThickness="1"/>
+                                <Line Canvas.Left="210" StartPoint="0,34" EndPoint="0,114" Stroke="#363636" StrokeDashArray="3,3" StrokeThickness="1.5"/>
+
+                                <!-- Target Line & Markers -->
+                                <Rectangle Canvas.Left="155" Canvas.Top="114" Width="110" Height="3" Fill="{StaticResource Highlight}" RadiusX="1.5" RadiusY="1.5"/>
+                                <!-- Target indicator labels -->
+                                <TextBlock Canvas.Left="108" Canvas.Top="109" Text="TARGET" FontSize="9" FontWeight="Bold" Foreground="{StaticResource Highlight}"/>
+                                <TextBlock Canvas.Left="275" Canvas.Top="109" Text="TARGET" FontSize="9" FontWeight="Bold" Foreground="{StaticResource Highlight}"/>
+
+                                <!-- Impact Ripple (expands when ball hits at 210, 114) -->
+                                <Ellipse x:Name="rippleRing" Canvas.Left="210" Canvas.Top="114" Width="0" Height="0" 
+                                         Stroke="{StaticResource Highlight}" StrokeThickness="2" Opacity="0" IsHitTestVisible="False"/>
+
+                                <!-- The Dropping Ball (Resting position Top=30, fully visible!) -->
+                                <Ellipse x:Name="ballElement" Canvas.Left="199" Canvas.Top="30" Width="22" Height="22" IsHitTestVisible="False">
+                                    <Ellipse.Fill>
+                                        <RadialGradientBrush Center="35%,35%" GradientOrigin="35%,35%" RadiusX="65%" RadiusY="65%">
+                                            <GradientStop Color="#FFFFFF" Offset="0.0"/>
+                                            <GradientStop Color="#60CDFF" Offset="0.45"/>
+                                            <GradientStop Color="#0066CC" Offset="1.0"/>
+                                        </RadialGradientBrush>
+                                    </Ellipse.Fill>
+                                    <Ellipse.Effect>
+                                        <DropShadowEffect Color="#60CDFF" BlurRadius="10" OffsetX="0" OffsetY="0" Opacity="0.85"/>
+                                    </Ellipse.Effect>
+                                </Ellipse>
+                            </Canvas>
+
+                            <!-- Big Center Feedback on Spacebar press -->
+                            <Border x:Name="borderFeedback" VerticalAlignment="Center" HorizontalAlignment="Center" 
+                                    Background="#E6102538" CornerRadius="5" Padding="14,5" BorderBrush="{StaticResource Highlight}" BorderThickness="1.5" IsVisible="False">
+                                <TextBlock x:Name="lblFeedbackText" Text="Tap: 185 ms" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Highlight}" TextAlignment="Center"/>
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                    <!-- Tap Recording Indicator / Stats (Compact Row) -->
+                    <Border Background="#252525" CornerRadius="5" BorderBrush="#353535" BorderThickness="1" Padding="10,5" Margin="0,0,0,5">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="Recorded Samples (Taps):" FontSize="10" Foreground="{StaticResource TextSec}"/>
+                                <TextBlock x:Name="lblTapHistory" Text="Press [Spacebar] when sound plays" FontSize="11.5" Foreground="#FFFFFF" Margin="0,1,0,0" TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="8,0,0,0">
+                                <TextBlock Text="Measured Latency:" FontSize="10" Foreground="{StaticResource TextSec}" HorizontalAlignment="Right"/>
+                                <TextBlock x:Name="lblAvgLatency" Text="-- ms" FontSize="15" FontWeight="Bold" Foreground="{StaticResource Highlight}" HorizontalAlignment="Right"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- Fine-Tuning & Human Reaction Compensation (Compact) -->
+                    <Border x:Name="borderReactionTuneCard" Background="#222222" CornerRadius="5" BorderBrush="#303030" BorderThickness="1" Padding="8,5" Margin="0,0,0,5">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <CheckBox x:Name="chkHumanReaction" Content="Compensate Reaction Time (-200ms)" Foreground="#D0D0D0" FontSize="11" IsChecked="True" VerticalAlignment="Center" IsCheckedChanged="ChkHumanReaction_Changed" ToolTip.Tip="Subtracts average human auditory reaction time (~200ms) to estimate the physical device latency"/>
+                                <Button x:Name="btnResetTaps" Grid.Column="1" Height="22" Padding="8,0" Background="#333333" BorderBrush="#454545" BorderThickness="1" Classes="DarkButton" FontSize="10.5" Click="BtnResetTaps_Click">
+                                    <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Center">
+                                        <TextBlock Text="↺" FontSize="11" VerticalAlignment="Center"/>
+                                        <TextBlock Text="Reset" FontSize="10.5" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+
+                            <!-- Manual Nudge / Stepper -->
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Fine-Tune Latency:" Foreground="{StaticResource TextSec}" FontSize="11" VerticalAlignment="Center"/>
+                                <Button Grid.Column="1" Content="- 5 ms" Height="22" Padding="6,0" Margin="3,0" Background="#333333" BorderBrush="#454545" BorderThickness="1" Classes="DarkButton" FontSize="10.5" Click="BtnNudgeDown_Click"/>
+                                <TextBlock Grid.Column="2" x:Name="lblFineTuneVal" Text="0 ms" Foreground="{StaticResource Highlight}" FontWeight="SemiBold" FontSize="11.5" VerticalAlignment="Center" Margin="3,0" MinWidth="42" TextAlignment="Center"/>
+                                <Button Grid.Column="3" Content="+ 5 ms" Height="22" Padding="6,0" Margin="3,0" Background="#333333" BorderBrush="#454545" BorderThickness="1" Classes="DarkButton" FontSize="10.5" Click="BtnNudgeUp_Click"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Action Controls: Start Drop / Apply / Clear in One Compact Row -->
+                    <Grid Margin="0,0,0,5">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.35*"/>
+                            <ColumnDefinition Width="6"/>
+                            <ColumnDefinition Width="1.35*"/>
+                            <ColumnDefinition Width="6"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        
+                        <Button Grid.Column="0" x:Name="btnTriggerDrop" Height="30" 
+                                Background="#243447" BorderBrush="#354E6B" BorderThickness="1"
+                                Click="BtnTriggerDrop_Click" Classes="DarkButton" HorizontalAlignment="Stretch"
+                                Focusable="False">
+                            <StackPanel Orientation="Horizontal" Spacing="5" HorizontalAlignment="Center">
+                                <TextBlock Text="▶" FontSize="11" VerticalAlignment="Center" Foreground="{StaticResource Highlight}"/>
+                                <TextBlock x:Name="lblTriggerDropText" Text="Start Drop" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{StaticResource Highlight}"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Button Grid.Column="2" x:Name="btnApplyCal" Height="30" 
+                                Background="#2E4A35" BorderBrush="#3D6846" BorderThickness="1"
+                                Click="BtnApplyCal_Click" Classes="DarkButton" HorizontalAlignment="Stretch">
+                            <StackPanel Orientation="Horizontal" Spacing="5" HorizontalAlignment="Center">
+                                <TextBlock Text="💾" FontFamily="Segoe UI Emoji, Segoe UI Symbol, sans-serif" FontSize="11" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="lblApplyCalText" Text="Apply" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="#70FFA0"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Button Grid.Column="4" x:Name="btnClearSaved" Height="30"
+                                Background="#2B2424" BorderBrush="#4D3535" BorderThickness="1"
+                                Click="BtnClearSaved_Click" Classes="DarkButton" HorizontalAlignment="Stretch"
+                                ToolTip.Tip="Clear saved calibration profile for this slot and reset delay to 0 ms">
+                            <StackPanel Orientation="Horizontal" Spacing="5" HorizontalAlignment="Center">
+                                <TextBlock Text="🗑" FontFamily="Segoe UI Emoji, Segoe UI Symbol, sans-serif" FontSize="11" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="lblClearSavedText" Text="Clear" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="#FF9999"/>
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+
+                    <!-- Global Settings Card: PC Speaker Mute Toggle (Global Calibration Section) -->
+                    <Border x:Name="borderGlobalSpeakerCard" Background="#252525" CornerRadius="5" BorderBrush="#383838" BorderThickness="1" Padding="10,7" Margin="0,0,0,5" IsVisible="True">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <TextBlock Text="🔈" FontFamily="Segoe UI Emoji, Segoe UI Symbol, sans-serif" FontSize="12" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Silence Internal PC Speaker" FontSize="12" FontWeight="SemiBold" Foreground="#FFFFFF" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <TextBlock Text="Mutes laptop speaker during streaming (prevents room echo)" FontSize="10.5" Foreground="{StaticResource TextSec}" Margin="20,2,0,0"/>
+                            </StackPanel>
+                            <CheckBox Grid.Column="1" x:Name="chkMuteDefaultDevice" 
+                                      IsChecked="True" 
+                                      VerticalAlignment="Center"
+                                      IsCheckedChanged="ChkMuteDefaultDevice_Changed"
+                                      ToolTip.Tip="Mutes the laptop internal speaker during streaming to prevent room echo. Uncheck to allow sound from both laptop speakers and connected devices simultaneously."/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Hardware Delay Offset Card (Individual Slot Only - Dynamic Numeric Input + Steppers) -->
+                    <Border x:Name="borderSlotDelayCard" Background="#252525" CornerRadius="5" BorderBrush="#383838" BorderThickness="1" Padding="8,6" Margin="0,0,0,2" IsVisible="False">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,5">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="lblDelayCardHeader" Text="⏱ Slot Delay Offset" FontSize="11.5" FontWeight="SemiBold" Foreground="#FFFFFF" VerticalAlignment="Center"/>
+                                <TextBlock Text="Nudge -/+ or type exact ms" FontSize="10" Foreground="{StaticResource TextSec}" Grid.Column="1" VerticalAlignment="Center"/>
+                            </Grid>
+
+                            <!-- Delay Slot 1 -->
+                            <Grid x:Name="gridDelaySlot1" HorizontalAlignment="Stretch" Margin="0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Delay 1:" Foreground="{StaticResource TextSec}" FontSize="11.5" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                
+                                <Button Grid.Column="2" Content="- 10 ms" Height="25" Padding="8,0" Margin="2,0" 
+                                        Background="#333333" BorderBrush="#454545" BorderThickness="1" 
+                                        Classes="DarkButton" FontSize="11" Click="BtnDelayDown_Click" Tag="1"
+                                        ToolTip.Tip="Decrease delay by 10 ms"/>
+
+                                <Border Grid.Column="3" Background="#1A1A1A" BorderBrush="#454545" BorderThickness="1" CornerRadius="4" Margin="3,0" Height="25" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0">
+                                        <TextBox x:Name="txtDelay1" Text="0" Width="44" Height="23" Padding="0,2" 
+                                                 Background="Transparent" BorderThickness="0" Foreground="{StaticResource Highlight}" 
+                                                 FontWeight="SemiBold" FontSize="12" TextAlignment="Center" VerticalContentAlignment="Center"
+                                                 TextChanged="TxtDelay_TextChanged" LostFocus="TxtDelay_LostFocus" Tag="1"
+                                                 ToolTip.Tip="Type any delay in milliseconds (e.g. 50, 450, 600)"/>
+                                        <TextBlock Text="ms" Foreground="{StaticResource TextSec}" FontSize="11" VerticalAlignment="Center" Margin="2,0,0,0"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Button Grid.Column="4" Content="+ 10 ms" Height="25" Padding="8,0" Margin="2,0" 
+                                        Background="#333333" BorderBrush="#454545" BorderThickness="1" 
+                                        Classes="DarkButton" FontSize="11" Click="BtnDelayUp_Click" Tag="1"
+                                        ToolTip.Tip="Increase delay by 10 ms"/>
+
+                                <Button Grid.Column="5" Content="↺ 0" Height="25" Padding="6,0" Margin="4,0,0,0" 
+                                        Background="#2E2424" Foreground="#FF9999" BorderBrush="#4A3535" BorderThickness="1" 
+                                        Classes="DarkButton" FontSize="11" Click="BtnDelayReset_Click" Tag="1"
+                                        ToolTip.Tip="Reset delay to 0 ms"/>
+                            </Grid>
+
+                            <!-- Delay Slot 2 -->
+                            <Grid x:Name="gridDelaySlot2" HorizontalAlignment="Stretch" Margin="0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Delay 2:" Foreground="{StaticResource TextSec}" FontSize="11.5" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                
+                                <Button Grid.Column="2" Content="- 10 ms" Height="25" Padding="8,0" Margin="2,0" 
+                                        Background="#333333" BorderBrush="#454545" BorderThickness="1" 
+                                        Classes="DarkButton" FontSize="11" Click="BtnDelayDown_Click" Tag="2"
+                                        ToolTip.Tip="Decrease delay by 10 ms"/>
+
+                                <Border Grid.Column="3" Background="#1A1A1A" BorderBrush="#454545" BorderThickness="1" CornerRadius="4" Margin="3,0" Height="25" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0">
+                                        <TextBox x:Name="txtDelay2" Text="0" Width="44" Height="23" Padding="0,2" 
+                                                 Background="Transparent" BorderThickness="0" Foreground="{StaticResource Highlight}" 
+                                                 FontWeight="SemiBold" FontSize="12" TextAlignment="Center" VerticalContentAlignment="Center"
+                                                 TextChanged="TxtDelay_TextChanged" LostFocus="TxtDelay_LostFocus" Tag="2"
+                                                 ToolTip.Tip="Type any delay in milliseconds (e.g. 50, 450, 600)"/>
+                                        <TextBlock Text="ms" Foreground="{StaticResource TextSec}" FontSize="11" VerticalAlignment="Center" Margin="2,0,0,0"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Button Grid.Column="4" Content="+ 10 ms" Height="25" Padding="8,0" Margin="2,0" 
+                                        Background="#333333" BorderBrush="#454545" BorderThickness="1" 
+                                        Classes="DarkButton" FontSize="11" Click="BtnDelayUp_Click" Tag="2"
+                                        ToolTip.Tip="Increase delay by 10 ms"/>
+
+                                <Button Grid.Column="5" Content="↺ 0" Height="25" Padding="6,0" Margin="4,0,0,0" 
+                                        Background="#2E2424" Foreground="#FF9999" BorderBrush="#4A3535" BorderThickness="1" 
+                                        Classes="DarkButton" FontSize="11" Click="BtnDelayReset_Click" Tag="2"
+                                        ToolTip.Tip="Reset delay to 0 ms"/>
+                            </Grid>
+
+                            <!-- Delay Slot 3 -->
+                            <Grid x:Name="gridDelaySlot3" HorizontalAlignment="Stretch" Margin="0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Delay 3:" Foreground="{StaticResource TextSec}" FontSize="11.5" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                
+                                <Button Grid.Column="2" Content="- 10 ms" Height="25" Padding="8,0" Margin="2,0" 
+                                        Background="#333333" BorderBrush="#454545" BorderThickness="1" 
+                                        Classes="DarkButton" FontSize="11" Click="BtnDelayDown_Click" Tag="3"
+                                        ToolTip.Tip="Decrease delay by 10 ms"/>
+
+                                <Border Grid.Column="3" Background="#1A1A1A" BorderBrush="#454545" BorderThickness="1" CornerRadius="4" Margin="3,0" Height="25" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0">
+                                        <TextBox x:Name="txtDelay3" Text="0" Width="44" Height="23" Padding="0,2" 
+                                                 Background="Transparent" BorderThickness="0" Foreground="{StaticResource Highlight}" 
+                                                 FontWeight="SemiBold" FontSize="12" TextAlignment="Center" VerticalContentAlignment="Center"
+                                                 TextChanged="TxtDelay_TextChanged" LostFocus="TxtDelay_LostFocus" Tag="3"
+                                                 ToolTip.Tip="Type any delay in milliseconds (e.g. 50, 450, 600)"/>
+                                        <TextBlock Text="ms" Foreground="{StaticResource TextSec}" FontSize="11" VerticalAlignment="Center" Margin="2,0,0,0"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Button Grid.Column="4" Content="+ 10 ms" Height="25" Padding="8,0" Margin="2,0" 
+                                        Background="#333333" BorderBrush="#454545" BorderThickness="1" 
+                                        Classes="DarkButton" FontSize="11" Click="BtnDelayUp_Click" Tag="3"
+                                        ToolTip.Tip="Increase delay by 10 ms"/>
+
+                                <Button Grid.Column="5" Content="↺ 0" Height="25" Padding="6,0" Margin="4,0,0,0" 
+                                        Background="#2E2424" Foreground="#FF9999" BorderBrush="#4A3535" BorderThickness="1" 
+                                        Classes="DarkButton" FontSize="11" Click="BtnDelayReset_Click" Tag="3"
+                                        ToolTip.Tip="Reset delay to 0 ms"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+    </Grid>
+</Window>

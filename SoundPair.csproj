@@ -1,28 +1,32 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <UseWPF>true</UseWPF>
-    <UseWindowsForms>true</UseWindowsForms>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <ApplicationIcon>SoundPair.ico</ApplicationIcon>
   </PropertyGroup>
 
-  <!-- Add this ItemGroup to prevent global namespace collisions -->
   <ItemGroup>
-    <Using Remove="System.Windows.Forms" />
-    <Using Remove="System.Drawing" />
-  </ItemGroup>
-  
-  <ItemGroup>
-    <None Remove="SoundPair.ico" />
-    <Resource Include="SoundPair.ico" />
+    <Compile Remove="wpf_backup\**" />
+    <None Remove="wpf_backup\**" />
   </ItemGroup>
 
   <ItemGroup>
+    <AvaloniaResource Include="SoundPair.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-xrw6-gwf8-vvr9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.2.1" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.2.1" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.1" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.1" />
     <PackageReference Include="NAudio" Version="3.1.0" />
   </ItemGroup>
-
 </Project>

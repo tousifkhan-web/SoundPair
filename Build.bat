@@ -1,11 +1,11 @@
 @echo off
 echo ===================================================
-echo   Building SoundPair (Standalone & Lightweight)
+echo   Building SoundPair (Standalone and Lightweight)
 echo ===================================================
 
 echo.
 echo [1/2] Building SoundPair_standalone (With .NET 10 Runtime)...
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:AssemblyName=SoundPair_standalone -o ./publish/standalone -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:AssemblyName=SoundPair -o ./publish/standalone -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
 
 if %errorlevel% neq 0 (
     echo.
@@ -15,7 +15,7 @@ if %errorlevel% neq 0 (
 
 echo.
 echo [2/2] Building Soundpair_lightweight (Without Runtime)...
-dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:AssemblyName=Soundpair_lightweight -o ./publish/light
+dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:AssemblyName=Soundpair_lightweight -o ./publish/light -p:IncludeNativeLibrariesForSelfExtract=true
 
 if %errorlevel% neq 0 (
     echo.
