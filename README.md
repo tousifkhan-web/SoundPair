@@ -1,6 +1,32 @@
 # SoundPair
 
+<div align="center">
+
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D7?style=for-the-badge&logo=windows)](https://github.com/tousifkhan-web/SoundPair/releases)
+[![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg?style=for-the-badge)](LICENSE.md)
+
+</div>
+
 A modern, high-performance C# desktop application built with **Avalonia UI 11** designed to route audio via **Native Windows Process Loopback** (driver-free) to **up to three audio devices simultaneously** with millisecond-precision delay synchronization, independent volume controls, visual calibration, and real-time Windows master volume linking.
+
+---
+
+## 📥 Download
+
+Download the latest standalone release for Windows:
+
+<div align="center">
+
+[![Download SoundPair](https://img.shields.io/badge/Download-SoundPair.exe-0078D4?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/tousifkhan-web/SoundPair/releases/latest/download/SoundPair.exe)
+
+<br/>
+
+**[📦 SoundPair.exe](https://github.com/tousifkhan-web/SoundPair/releases/latest/download/SoundPair.exe)**  
+_Single self-contained `.exe` • Windows 10 / 11 (64-bit) • No installation or .NET runtime required_
+
+You can also view all releases and changelogs on the **[Releases Page](https://github.com/tousifkhan-web/SoundPair/releases)**.
+
+</div>
 
 ---
 
@@ -17,6 +43,7 @@ Follow these simple steps to get SoundPair up and running from scratch:
 ### Step 1: Zero Driver Setup (Driver-Free)
 
 SoundPair utilizes **Native Windows 11 Process Loopback Capture** (`WithProcessLoopback`).
+
 - **No virtual audio cables, third-party drivers, or kernel drivers are required.**
 - Captures pre-mute system audio directly across all apps with zero configuration.
 
@@ -107,12 +134,12 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=
 
 This project is licensed under the **PolyForm Noncommercial License 1.0.0**.
 
-* Free for personal use, research, hobby, education, and noncommercial organizations.
-* Commercial use, resale, or distribution requires explicit permission or a separate commercial agreement from the author.
+- Free for personal use, research, hobby, education, and noncommercial organizations.
+- Commercial use, resale, or distribution requires explicit permission or a separate commercial agreement from the author.
 
 See [LICENSE.md](LICENSE.md) for full license terms and conditions.
 
 ### Third-Party Libraries
-* [Avalonia UI](https://github.com/AvaloniaUI/Avalonia) - Licensed under the [MIT License](https://github.com/AvaloniaUI/Avalonia/blob/master/licence.md)
-* [NAudio](https://github.com/naudio/NAudio) - Licensed under the [MIT License](https://github.com/naudio/NAudio/blob/master/license.txt)
 
+- [Avalonia UI](https://github.com/AvaloniaUI/Avalonia) - Licensed under the [MIT License](https://github.com/AvaloniaUI/Avalonia/blob/master/licence.md)
+- [NAudio](https://github.com/naudio/NAudio) - Licensed under the [MIT License](https://github.com/naudio/NAudio/blob/master/license.txt)
