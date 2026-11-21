@@ -7,8 +7,8 @@
         x:Class="SoundPair.MainWindow"
         Title="Sound Pair - Tri-Device Audio Streamer" 
         Icon="/SoundPair.ico"
-        MinWidth="470" MinHeight="630"
-        Width="470" Height="630"
+        MinWidth="470" MinHeight="650"
+        Width="470" Height="650"
         WindowStartupLocation="CenterScreen"
         Background="#202020"
         FontFamily="Segoe UI Variable, Segoe UI, Segoe UI Emoji, Inter, sans-serif"
@@ -665,6 +665,7 @@
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Text="Delay 1:" Foreground="{StaticResource TextSec}" FontSize="11.5" VerticalAlignment="Center" Margin="0,0,6,0"/>
                                 
@@ -693,6 +694,11 @@
                                         Background="#2E2424" Foreground="#FF9999" BorderBrush="#4A3535" BorderThickness="1" 
                                         Classes="DarkButton" FontSize="11" Click="BtnDelayReset_Click" Tag="1"
                                         ToolTip.Tip="Reset delay to 0 ms"/>
+
+                                <Button Grid.Column="6" Content="💾 Save" Height="25" Padding="7,0" Margin="4,0,0,0" 
+                                        Background="#1E3A2B" Foreground="#70FFA0" BorderBrush="#2D5A3D" BorderThickness="1" 
+                                        Classes="DarkButton" FontSize="11" Click="BtnDelaySave_Click" Tag="1"
+                                        ToolTip.Tip="Save this delay value for Device Slot 1"/>
                             </Grid>
 
                             <!-- Delay Slot 2 -->
@@ -700,6 +706,7 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="Auto"/>
@@ -732,6 +739,11 @@
                                         Background="#2E2424" Foreground="#FF9999" BorderBrush="#4A3535" BorderThickness="1" 
                                         Classes="DarkButton" FontSize="11" Click="BtnDelayReset_Click" Tag="2"
                                         ToolTip.Tip="Reset delay to 0 ms"/>
+
+                                <Button Grid.Column="6" Content="💾 Save" Height="25" Padding="7,0" Margin="4,0,0,0" 
+                                        Background="#1E3A2B" Foreground="#70FFA0" BorderBrush="#2D5A3D" BorderThickness="1" 
+                                        Classes="DarkButton" FontSize="11" Click="BtnDelaySave_Click" Tag="2"
+                                        ToolTip.Tip="Save this delay value for Device Slot 2"/>
                             </Grid>
 
                             <!-- Delay Slot 3 -->
@@ -739,6 +751,7 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="Auto"/>
@@ -771,6 +784,11 @@
                                         Background="#2E2424" Foreground="#FF9999" BorderBrush="#4A3535" BorderThickness="1" 
                                         Classes="DarkButton" FontSize="11" Click="BtnDelayReset_Click" Tag="3"
                                         ToolTip.Tip="Reset delay to 0 ms"/>
+
+                                <Button Grid.Column="6" Content="💾 Save" Height="25" Padding="7,0" Margin="4,0,0,0" 
+                                        Background="#1E3A2B" Foreground="#70FFA0" BorderBrush="#2D5A3D" BorderThickness="1" 
+                                        Classes="DarkButton" FontSize="11" Click="BtnDelaySave_Click" Tag="3"
+                                        ToolTip.Tip="Save this delay value for Device Slot 3"/>
                             </Grid>
                         </StackPanel>
                     </Border>

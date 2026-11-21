@@ -83,7 +83,7 @@ namespace SoundPair
         private int _calActiveSlot = 0; // 0 = Global, 1 = Slot 1, 2 = Slot 2, 3 = Slot 3
         private WasapiPlayer? _calPlayer;
         private CalibrationClickProvider? _calClickProvider;
-        private readonly List<(WasapiPlayer player, CalibrationClickProvider provider, int slotIndex)> _globalCalOutputs = new();
+        private readonly List<(WasapiPlayer player, CalibrationClickProvider provider, int slotIndex, bool isWireless)> _globalCalOutputs = new();
         private readonly Stopwatch _dropStopwatch = new Stopwatch();
         private DispatcherTimer? _autoDropTimer;
         private bool _isDropping = false;
@@ -386,6 +386,42 @@ namespace SoundPair
             catch { }
         }
 
+        private void SaveDeviceDelay(string deviceName, int delayMs)
+        {
+            try
+            {
+                string pureName = GetPureDeviceName(deviceName) ?? deviceName;
+                deviceProfiles[$"delay_{pureName}"] = delayMs;
+                deviceProfiles[$"delay_{deviceName}"] = delayMs;
+                SaveDeviceProfilesFile();
+            }
+            catch { }
+        }
+
+        private int? GetSavedDeviceDelay(string? rawDeviceName)
+        {
+            if (string.IsNullOrEmpty(rawDeviceName) || rawDeviceName.StartsWith("--")) return null;
+            string pure = GetPureDeviceName(rawDeviceName) ?? rawDeviceName;
+
+            if (deviceProfiles.TryGetValue($"delay_{pure}", out int d1)) return d1;
+            if (deviceProfiles.TryGetValue($"delay_{rawDeviceName}", out int d2)) return d2;
+
+            foreach (var kvp in deviceProfiles)
+            {
+                if (kvp.Key.StartsWith("delay_", StringComparison.OrdinalIgnoreCase))
+                {
+                    string keyName = kvp.Key.Substring(6);
+                    if (keyName.Length >= 6 && pure.Length >= 6 &&
+                        (pure.Contains(keyName, StringComparison.OrdinalIgnoreCase) ||
+                         keyName.Contains(pure, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return kvp.Value;
+                    }
+                }
+            }
+            return null;
+        }
+
         private void ClearDeviceProfile(string deviceName)
         {
             try
@@ -393,10 +429,14 @@ namespace SoundPair
                 string pure = GetPureDeviceName(deviceName) ?? deviceName;
                 deviceProfiles.Remove(pure);
                 deviceProfiles.Remove(deviceName);
+                deviceProfiles.Remove($"delay_{pure}");
+                deviceProfiles.Remove($"delay_{deviceName}");
 
                 var toRemove = deviceProfiles.Keys.Where(k =>
                     k.Equals(pure, StringComparison.OrdinalIgnoreCase) ||
                     k.Equals(deviceName, StringComparison.OrdinalIgnoreCase) ||
+                    k.Equals($"delay_{pure}", StringComparison.OrdinalIgnoreCase) ||
+                    k.Equals($"delay_{deviceName}", StringComparison.OrdinalIgnoreCase) ||
                     (k.Length >= 6 && pure.Length >= 6 && (pure.Contains(k, StringComparison.OrdinalIgnoreCase) || k.Contains(pure, StringComparison.OrdinalIgnoreCase)))).ToList();
 
                 foreach (var key in toRemove)
@@ -446,6 +486,31 @@ namespace SoundPair
             var dev1 = GetDeviceFromCombo(comboDevice1);
             var dev2 = GetDeviceFromCombo(comboDevice2);
             var dev3 = GetDeviceFromCombo(comboDevice3);
+
+            int? d1 = dev1 != null ? GetSavedDeviceDelay(dev1.FriendlyName) : null;
+            int? d2 = dev2 != null ? GetSavedDeviceDelay(dev2.FriendlyName) : null;
+            int? d3 = dev3 != null ? GetSavedDeviceDelay(dev3.FriendlyName) : null;
+
+            if (d1.HasValue || d2.HasValue || d3.HasValue)
+            {
+                int delay1 = d1 ?? 0;
+                int delay2 = d2 ?? 0;
+                int delay3 = d3 ?? 0;
+                int maxDelay = Math.Max(delay1, Math.Max(delay2, delay3));
+                UpdateGlobalOffset(maxDelay);
+
+                SetSlotDelay(1, delay1, applyIfStreaming: false);
+                SetSlotDelay(2, delay2, applyIfStreaming: false);
+                SetSlotDelay(3, delay3, applyIfStreaming: false);
+
+                if (lblStatus != null)
+                {
+                    lblStatus.Text = $"Status: Loaded saved delays (Slot 1: {delay1}ms, Slot 2: {delay2}ms, Slot 3: {delay3}ms)";
+                    lblStatus.Foreground = Brushes.LightGreen;
+                }
+                UpdateCalibrationDisplayForCurrentSlot();
+                return;
+            }
 
             int? l1 = dev1 != null ? GetSavedProfileLatency(dev1.FriendlyName) : null;
             int? l2 = dev2 != null ? GetSavedProfileLatency(dev2.FriendlyName) : null;
@@ -611,6 +676,8 @@ namespace SoundPair
 
         #endregion
 
+        private static int GetBasePaddingMs(bool isWireless) => isWireless ? 80 : 60;
+
         private void StartSlotPlayback(int slotIndex, MMDevice dev)
         {
             if (capture == null || !isStreaming) return;
@@ -641,7 +708,7 @@ namespace SoundPair
                     case 3: _isSlot3Wireless = isWireless; break;
                 }
 
-                int basePadding = isWireless ? 80 : 40;
+                int basePadding = GetBasePaddingMs(isWireless);
                 int targetPaddingMs = basePadding + Math.Max(0, delayMs);
                 int prefillBytes = (int)((long)targetPaddingMs * capture.WaveFormat.AverageBytesPerSecond / 1000);
                 prefillBytes -= (prefillBytes % capture.WaveFormat.BlockAlign);
@@ -659,7 +726,15 @@ namespace SoundPair
                     3 => sliderVol3.Value,
                     _ => 100
                 };
-                sampleChannel.Volume = cachedSysVol * (float)(volVal / 100.0);
+                float volFactor = (float)(volVal / 100.0);
+                bool isHardwareBound = slotIndex switch
+                {
+                    1 => boundDevice1 != null,
+                    2 => boundDevice2 != null,
+                    3 => boundDevice3 != null,
+                    _ => false
+                };
+                sampleChannel.Volume = cachedSysVol * (isHardwareBound ? 1.0f : volFactor);
 
                 ISampleProvider prov = sampleChannel;
                 int targetRate = GetDeviceMixFormat(dev).SampleRate;
@@ -760,13 +835,13 @@ namespace SoundPair
             if (capture == null) return;
             int bps = capture.WaveFormat.AverageBytesPerSecond;
 
-            int target1 = (int)((long)((_isSlot1Wireless ? 80 : 40) + Math.Max(0, delay1Ms)) * bps / 1000);
+            int target1 = (int)((long)(GetBasePaddingMs(_isSlot1Wireless) + Math.Max(0, delay1Ms)) * bps / 1000);
             _maxBacklogBytes1 = target1 + (int)((long)140 * bps / 1000);
 
-            int target2 = (int)((long)((_isSlot2Wireless ? 80 : 40) + Math.Max(0, delay2Ms)) * bps / 1000);
+            int target2 = (int)((long)(GetBasePaddingMs(_isSlot2Wireless) + Math.Max(0, delay2Ms)) * bps / 1000);
             _maxBacklogBytes2 = target2 + (int)((long)140 * bps / 1000);
 
-            int target3 = (int)((long)((_isSlot3Wireless ? 80 : 40) + Math.Max(0, delay3Ms)) * bps / 1000);
+            int target3 = (int)((long)(GetBasePaddingMs(_isSlot3Wireless) + Math.Max(0, delay3Ms)) * bps / 1000);
             _maxBacklogBytes3 = target3 + (int)((long)140 * bps / 1000);
         }
 
@@ -784,7 +859,7 @@ namespace SoundPair
         private void CheckSlotRecovery(BufferedWaveProvider? buf, int slotIndex, int delayMs, bool isWireless, int bps, int ba)
         {
             if (buf == null) return;
-            int basePadding = isWireless ? 80 : 40;
+            int basePadding = GetBasePaddingMs(isWireless);
             int targetBytes = (int)((long)(basePadding + Math.Max(0, delayMs)) * bps / 1000);
             targetBytes -= (targetBytes % ba);
 
@@ -962,7 +1037,7 @@ namespace SoundPair
                     lblVol1Val.Text = $"{(int)newVol}%";
                     if (sampleChannel1 != null)
                     {
-                        sampleChannel1.Volume = cachedSysVol * (float)data.MasterVolume;
+                        sampleChannel1.Volume = cachedSysVol * (boundDevice1 != null ? 1.0f : (float)data.MasterVolume);
                     }
                     _isSyncingVolume1 = false;
                 }
@@ -984,7 +1059,7 @@ namespace SoundPair
                     lblVol2Val.Text = $"{(int)newVol}%";
                     if (sampleChannel2 != null)
                     {
-                        sampleChannel2.Volume = cachedSysVol * (float)data.MasterVolume;
+                        sampleChannel2.Volume = cachedSysVol * (boundDevice2 != null ? 1.0f : (float)data.MasterVolume);
                     }
                     _isSyncingVolume2 = false;
                 }
@@ -1006,7 +1081,7 @@ namespace SoundPair
                     lblVol3Val.Text = $"{(int)newVol}%";
                     if (sampleChannel3 != null)
                     {
-                        sampleChannel3.Volume = cachedSysVol * (float)data.MasterVolume;
+                        sampleChannel3.Volume = cachedSysVol * (boundDevice3 != null ? 1.0f : (float)data.MasterVolume);
                     }
                     _isSyncingVolume3 = false;
                 }
@@ -1482,7 +1557,34 @@ namespace SoundPair
                 // Global section: show PC Speaker Mute & Auto Video Sync options, hide slot delay sliders
                 if (borderGlobalSpeakerCard != null) borderGlobalSpeakerCard.IsVisible = true;
                 if (borderGlobalSyncCard != null) borderGlobalSyncCard.IsVisible = true;
-                if (borderSlotDelayCard != null) borderSlotDelayCard.IsVisible = false;
+                if (borderSlotDelayCard != null)
+                {
+                    borderSlotDelayCard.IsVisible = true;
+                    if (lblDelayCardHeader != null) lblDelayCardHeader.Text = "⏱ Output Delay Offsets";
+                    _isUpdatingDelayText = true;
+                    try
+                    {
+                        if (gridDelaySlot1 != null)
+                        {
+                            gridDelaySlot1.IsVisible = GetDeviceFromCombo(comboDevice1) != null;
+                            if (txtDelay1 != null) txtDelay1.Text = delay1Ms.ToString();
+                        }
+                        if (gridDelaySlot2 != null)
+                        {
+                            gridDelaySlot2.IsVisible = GetDeviceFromCombo(comboDevice2) != null;
+                            if (txtDelay2 != null) txtDelay2.Text = delay2Ms.ToString();
+                        }
+                        if (gridDelaySlot3 != null)
+                        {
+                            gridDelaySlot3.IsVisible = GetDeviceFromCombo(comboDevice3) != null;
+                            if (txtDelay3 != null) txtDelay3.Text = delay3Ms.ToString();
+                        }
+                    }
+                    finally
+                    {
+                        _isUpdatingDelayText = false;
+                    }
+                }
 
                 if (lblCalModeHeader != null) lblCalModeHeader.Text = "Target: ";
                 if (lblCalActiveDevice != null)
@@ -1577,7 +1679,7 @@ namespace SoundPair
                     lblStagePrompt.Foreground = Brushes.White;
                 }
 
-                int? savedLat = GetSavedProfileLatency(dev.FriendlyName);
+                int? savedLat = GetSavedDeviceDelay(dev.FriendlyName) ?? GetSavedProfileLatency(dev.FriendlyName);
                 if (savedLat.HasValue)
                 {
                     if (lblAvgLatency != null) lblAvgLatency.Text = $"{savedLat.Value} ms";
@@ -1651,14 +1753,23 @@ namespace SoundPair
                         if (dev == null) continue;
                         try
                         {
+                            bool isWireless = IsWirelessDevice(dev);
+                            int latency = isWireless ? 100 : 50;
+                            string mmcss = isWireless ? "Audio" : "Pro Audio";
+
                             var mixFormat = GetDeviceMixFormat(dev);
                             var provider = new CalibrationClickProvider(mixFormat.SampleRate, mixFormat.Channels);
-                            var player = new WasapiPlayerBuilder().WithDevice(dev).Build();
+                            var player = new WasapiPlayerBuilder()
+                                .WithDevice(dev)
+                                .WithLatency(latency)
+                                .WithMmcssThreadPriority(mmcss)
+                                .Build();
+
                             player.Init(provider);
                             player.Play();
                             lock (_globalCalOutputs)
                             {
-                                _globalCalOutputs.Add((player, provider, slotIndex));
+                                _globalCalOutputs.Add((player, provider, slotIndex, isWireless));
                             }
                         }
                         catch (Exception ex)
@@ -1672,9 +1783,18 @@ namespace SoundPair
                 if (singleDev == null) return;
                 try
                 {
+                    bool isWireless = IsWirelessDevice(singleDev);
+                    int latency = isWireless ? 100 : 50;
+                    string mmcss = isWireless ? "Audio" : "Pro Audio";
+
                     var mixFormat = GetDeviceMixFormat(singleDev);
                     var provider = new CalibrationClickProvider(mixFormat.SampleRate, mixFormat.Channels);
-                    var player = new WasapiPlayerBuilder().WithDevice(singleDev).Build();
+                    var player = new WasapiPlayerBuilder()
+                        .WithDevice(singleDev)
+                        .WithLatency(latency)
+                        .WithMmcssThreadPriority(mmcss)
+                        .Build();
+
                     player.Init(provider);
                     player.Play();
                     _calClickProvider = provider;
@@ -1691,7 +1811,7 @@ namespace SoundPair
         {
             lock (_globalCalOutputs)
             {
-                foreach (var (player, _, _) in _globalCalOutputs)
+                foreach (var (player, _, _, _) in _globalCalOutputs)
                 {
                     try { player.Stop(); } catch { }
                     try { player.Dispose(); } catch { }
@@ -1833,8 +1953,8 @@ namespace SoundPair
 
             if (_calActiveSlot == 0)
             {
-                // Global mode: play transient to all active outputs with their calibrated delay offsets
-                foreach (var (_, provider, slot) in _globalCalOutputs)
+                // Global mode: play transient to all active outputs with their configured delay offsets and base padding
+                foreach (var (_, provider, slot, isWireless) in _globalCalOutputs)
                 {
                     int delay = slot switch
                     {
@@ -1843,13 +1963,16 @@ namespace SoundPair
                         3 => delay3Ms,
                         _ => 0
                     };
-                    provider.Trigger(delay);
+                    int basePadding = GetBasePaddingMs(isWireless);
+                    provider.Trigger(basePadding + delay);
                 }
             }
             else
             {
-                // Single slot mode
-                _calClickProvider?.Trigger(0);
+                var dev = GetActiveCalDevice();
+                bool isWireless = dev != null && IsWirelessDevice(dev);
+                int basePadding = GetBasePaddingMs(isWireless);
+                _calClickProvider?.Trigger(basePadding);
             }
 
             TriggerImpactRipple();
@@ -2431,12 +2554,16 @@ namespace SoundPair
                 {
                     capture = await new WasapiRecorderBuilder()
                         .WithProcessLoopback(currentPid, ProcessLoopbackMode.ExcludeTargetProcessTree)
+                        .WithFormat(WaveFormat.CreateIeeeFloatWaveFormat(48000, 2))
                         .BuildAsync();
                 }
                 catch
                 {
                     // Graceful fallback if on an older Windows release
-                    capture = new WasapiRecorderBuilder().WithLoopbackCapture().Build();
+                    capture = new WasapiRecorderBuilder()
+                        .WithLoopbackCapture()
+                        .WithFormat(WaveFormat.CreateIeeeFloatWaveFormat(48000, 2))
+                        .Build();
                 }
 
                 // Start playback on all active slots with independent, low-latency 800ms buffers
@@ -2458,7 +2585,14 @@ namespace SoundPair
                                 transferBuffer = new byte[buffer.Length];
                             }
 
-                            buffer.CopyTo(transferBuffer);
+                            if ((flags & AudioClientBufferFlags.Silent) != 0)
+                            {
+                                Array.Clear(transferBuffer, 0, buffer.Length);
+                            }
+                            else
+                            {
+                                buffer.CopyTo(transferBuffer);
+                            }
 
                             // Independent, lock-free, isolated writes per slot:
                             // When one headset moves to a distance, its buffer hits its backlog cap.
@@ -2576,7 +2710,7 @@ namespace SoundPair
 
                 if (sampleChannel1 != null)
                 {
-                    sampleChannel1.Volume = cachedSysVol * volFactor;
+                    sampleChannel1.Volume = cachedSysVol * (boundDevice1 != null ? 1.0f : volFactor);
                 }
 
                 if (boundDevice1 != null)
@@ -2598,7 +2732,7 @@ namespace SoundPair
 
                 if (sampleChannel2 != null)
                 {
-                    sampleChannel2.Volume = cachedSysVol * volFactor;
+                    sampleChannel2.Volume = cachedSysVol * (boundDevice2 != null ? 1.0f : volFactor);
                 }
 
                 if (boundDevice2 != null)
@@ -2620,7 +2754,7 @@ namespace SoundPair
 
                 if (sampleChannel3 != null)
                 {
-                    sampleChannel3.Volume = cachedSysVol * volFactor;
+                    sampleChannel3.Volume = cachedSysVol * (boundDevice3 != null ? 1.0f : volFactor);
                 }
 
                 if (boundDevice3 != null)
@@ -2661,6 +2795,60 @@ namespace SoundPair
             if (sender is Button btn && btn.Tag is string tagStr && int.TryParse(tagStr, out int slot))
             {
                 SetSlotDelay(slot, 0);
+            }
+        }
+
+        private async void BtnDelaySave_Click(object? sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is string tagStr && int.TryParse(tagStr, out int slot))
+            {
+                var dev = slot switch
+                {
+                    1 => GetDeviceFromCombo(comboDevice1),
+                    2 => GetDeviceFromCombo(comboDevice2),
+                    3 => GetDeviceFromCombo(comboDevice3),
+                    _ => null
+                };
+
+                if (dev == null)
+                {
+                    ShowWarning($"Please select an active output device for Slot {slot} first.");
+                    return;
+                }
+
+                int currentDelay = slot switch
+                {
+                    1 => delay1Ms,
+                    2 => delay2Ms,
+                    3 => delay3Ms,
+                    _ => 0
+                };
+
+                SaveDeviceDelay(dev.FriendlyName, currentDelay);
+                SaveDeviceProfile(dev.FriendlyName, currentDelay);
+
+                if (isStreaming)
+                {
+                    ApplyDelays();
+                }
+
+                if (lblStatus != null)
+                {
+                    lblStatus.Text = $"Status: Saved {currentDelay} ms delay for Slot {slot} ({dev.FriendlyName})!";
+                    lblStatus.Foreground = Brushes.LightGreen;
+                }
+
+                object? originalContent = btn.Content;
+                var originalBg = btn.Background;
+                var originalFg = btn.Foreground;
+
+                btn.Content = "Saved! ✓";
+                btn.Background = new SolidColorBrush(Color.FromRgb(30, 58, 43));
+                btn.Foreground = new SolidColorBrush(Color.FromRgb(112, 255, 160));
+                await Task.Delay(1500);
+                btn.Content = originalContent;
+                btn.Background = originalBg;
+                btn.Foreground = originalFg;
             }
         }
 
@@ -2767,9 +2955,9 @@ namespace SoundPair
 
         private void ApplySystemAndAppVolumes()
         {
-            if (sampleChannel1 != null) sampleChannel1.Volume = cachedSysVol * (float)(sliderVol1.Value / 100.0);
-            if (sampleChannel2 != null) sampleChannel2.Volume = cachedSysVol * (float)(sliderVol2.Value / 100.0);
-            if (sampleChannel3 != null) sampleChannel3.Volume = cachedSysVol * (float)(sliderVol3.Value / 100.0);
+            if (sampleChannel1 != null) sampleChannel1.Volume = cachedSysVol * (boundDevice1 != null ? 1.0f : (float)(sliderVol1.Value / 100.0));
+            if (sampleChannel2 != null) sampleChannel2.Volume = cachedSysVol * (boundDevice2 != null ? 1.0f : (float)(sliderVol2.Value / 100.0));
+            if (sampleChannel3 != null) sampleChannel3.Volume = cachedSysVol * (boundDevice3 != null ? 1.0f : (float)(sliderVol3.Value / 100.0));
         }
 
         private void ApplyDelays()
@@ -2777,9 +2965,9 @@ namespace SoundPair
             if (capture == null) return;
             int blockAlign = capture.WaveFormat.BlockAlign;
 
-            ApplyBufferDelay(buffer1, (_isSlot1Wireless ? 80 : 40) + delay1Ms, blockAlign);
-            ApplyBufferDelay(buffer2, (_isSlot2Wireless ? 80 : 40) + delay2Ms, blockAlign);
-            ApplyBufferDelay(buffer3, (_isSlot3Wireless ? 80 : 40) + delay3Ms, blockAlign);
+            ApplyBufferDelay(buffer1, GetBasePaddingMs(_isSlot1Wireless) + delay1Ms, blockAlign);
+            ApplyBufferDelay(buffer2, GetBasePaddingMs(_isSlot2Wireless) + delay2Ms, blockAlign);
+            ApplyBufferDelay(buffer3, GetBasePaddingMs(_isSlot3Wireless) + delay3Ms, blockAlign);
             UpdateMaxBacklogLimits();
         }
 
