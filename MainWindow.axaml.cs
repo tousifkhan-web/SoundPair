@@ -43,8 +43,6 @@ namespace SoundPair
         private int delay3Ms = 0;
         private int globalOffsetMs = 0;
 
-        // Baseline buffer padding to prevent initial WASAPI shared-mode underruns
-        private const int BaseDelayMs = 40;
         private const int WM_DEVICECHANGE = 0x0219;
 
         private float cachedSysVol = 1.0f;
@@ -52,6 +50,12 @@ namespace SoundPair
         private volatile bool _slot1Stalled = false;
         private volatile bool _slot2Stalled = false;
         private volatile bool _slot3Stalled = false;
+        private volatile int _maxBacklogBytes1 = int.MaxValue;
+        private volatile int _maxBacklogBytes2 = int.MaxValue;
+        private volatile int _maxBacklogBytes3 = int.MaxValue;
+        private bool _isSlot1Wireless = false;
+        private bool _isSlot2Wireless = false;
+        private bool _isSlot3Wireless = false;
         private bool _originalSpeakerMuteState = false;
         private bool _isSyncingSpeakerMute = false;
         private string? originalDefaultDeviceId = null;
@@ -68,6 +72,11 @@ namespace SoundPair
         // Persistent Device Profiles
         private string profilesFilePath = string.Empty;
         private Dictionary<string, int> deviceProfiles = new(StringComparer.OrdinalIgnoreCase);
+
+        // Auto Video Sync (Milestone 2: Media Player & Browser Sync)
+        private readonly MediaPlayerSyncService _mediaPlayerSyncService = new();
+        private readonly BrowserSyncServer _browserSyncServer = new();
+        private DispatcherTimer? _mediaPlayerWatcherTimer;
 
         // Visual Calibration Studio
         private bool isVisualCalibrating = false;
@@ -174,6 +183,43 @@ namespace SoundPair
 
             SwitchToInternalSpeakersOnStartup();
             LoadAudioDevices();
+
+            // Initialize Auto-Sync Services (Milestone 2)
+            _mediaPlayerSyncService.OnSyncStatusChanged += (status) =>
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (lblPlayerSyncStatus != null)
+                    {
+                        lblPlayerSyncStatus.Text = status;
+                        lblPlayerSyncStatus.Foreground = status.StartsWith("🟢")
+                            ? Brushes.LightGreen
+                            : new SolidColorBrush(Color.FromRgb(160, 174, 192));
+                    }
+                });
+            };
+
+            _browserSyncServer.Start(48888);
+
+            _mediaPlayerWatcherTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+            _mediaPlayerWatcherTimer.Tick += async (_, _) =>
+            {
+                try
+                {
+                    if (isStreaming)
+                    {
+                        CheckSlotBufferHealth();
+
+                        if (globalOffsetMs > 0 && _mediaPlayerSyncService.IsAutoSyncEnabled)
+                        {
+                            await _mediaPlayerSyncService.TrySyncActivePlayersAsync(globalOffsetMs);
+                        }
+                    }
+                }
+                catch { }
+            };
+            // Timer starts only when streaming starts, saving system resources when idle
+            // _mediaPlayerWatcherTimer.Start();
 
             // Lock initial window width to 470 so Column 1 (450px) is clipped off-screen until opened
             this.MaxWidth = 470.0;
@@ -413,8 +459,7 @@ namespace SoundPair
             if (valid.Count >= 2)
             {
                 int maxLat = valid.Max();
-                globalOffsetMs = maxLat;
-                if (lblGlobalOffset != null) lblGlobalOffset.Text = globalOffsetMs > 0 ? $"-{globalOffsetMs} ms" : "0 ms";
+                UpdateGlobalOffset(maxLat);
 
                 SetSlotDelay(1, l1.HasValue ? Math.Max(0, maxLat - l1.Value) : 0, applyIfStreaming: false);
                 SetSlotDelay(2, l2.HasValue ? Math.Max(0, maxLat - l2.Value) : 0, applyIfStreaming: false);
@@ -429,8 +474,7 @@ namespace SoundPair
             else if (valid.Count == 1)
             {
                 int singleLat = valid[0];
-                globalOffsetMs = singleLat;
-                if (lblGlobalOffset != null) lblGlobalOffset.Text = globalOffsetMs > 0 ? $"-{globalOffsetMs} ms" : "0 ms";
+                UpdateGlobalOffset(singleLat);
 
                 SetSlotDelay(1, 0, applyIfStreaming: false);
                 SetSlotDelay(2, 0, applyIfStreaming: false);
@@ -444,8 +488,7 @@ namespace SoundPair
             }
             else
             {
-                globalOffsetMs = 0;
-                if (lblGlobalOffset != null) lblGlobalOffset.Text = "0 ms";
+                UpdateGlobalOffset(0);
                 SetSlotDelay(1, 0, applyIfStreaming: false);
                 SetSlotDelay(2, 0, applyIfStreaming: false);
                 SetSlotDelay(3, 0, applyIfStreaming: false);
@@ -576,7 +619,7 @@ namespace SoundPair
             {
                 KillStreamSlot(slotIndex);
 
-                // Reduced buffer capacity prevents massive latency drift & buffer bloat
+                // Fast-clearing buffer with discard on overflow to prevent latency drift
                 var newBuf = new BufferedWaveProvider(capture.WaveFormat)
                 {
                     DiscardOnBufferOverflow = true
@@ -590,7 +633,16 @@ namespace SoundPair
                     _ => 0
                 };
 
-                int targetPaddingMs = BaseDelayMs + Math.Max(0, delayMs);
+                bool isWireless = IsWirelessDevice(dev);
+                switch (slotIndex)
+                {
+                    case 1: _isSlot1Wireless = isWireless; break;
+                    case 2: _isSlot2Wireless = isWireless; break;
+                    case 3: _isSlot3Wireless = isWireless; break;
+                }
+
+                int basePadding = isWireless ? 80 : 40;
+                int targetPaddingMs = basePadding + Math.Max(0, delayMs);
                 int prefillBytes = (int)((long)targetPaddingMs * capture.WaveFormat.AverageBytesPerSecond / 1000);
                 prefillBytes -= (prefillBytes % capture.WaveFormat.BlockAlign);
                 if (prefillBytes > 0)
@@ -616,42 +668,48 @@ namespace SoundPair
                     prov = new WdlResamplingSampleProvider(prov, targetRate);
                 }
 
+                // Wireless devices benefit from 100ms WASAPI buffer to absorb packet retries without glitching
+                int latency = isWireless ? 100 : 50;
                 var player = new WasapiPlayerBuilder()
                     .WithDevice(dev)
-                    .WithLatency(60)
-                    .WithMmcssThreadPriority("Pro Audio")
+                    .WithLatency(latency)
+                    .WithMmcssThreadPriority(isWireless ? "Audio" : "Pro Audio")
                     .Build();
 
                 player.Init(prov);
 
-                switch (slotIndex)
+                lock (_bufferLock)
                 {
-                    case 1:
-                        buffer1 = newBuf;
-                        sampleChannel1 = sampleChannel;
-                        out1 = player;
-                        activeId1 = dev.ID;
-                        _slot1Stalled = false;
-                        player.PlaybackStopped += (s, e) => { _slot1Stalled = true; };
-                        break;
-                    case 2:
-                        buffer2 = newBuf;
-                        sampleChannel2 = sampleChannel;
-                        out2 = player;
-                        activeId2 = dev.ID;
-                        _slot2Stalled = false;
-                        player.PlaybackStopped += (s, e) => { _slot2Stalled = true; };
-                        break;
-                    case 3:
-                        buffer3 = newBuf;
-                        sampleChannel3 = sampleChannel;
-                        out3 = player;
-                        activeId3 = dev.ID;
-                        _slot3Stalled = false;
-                        player.PlaybackStopped += (s, e) => { _slot3Stalled = true; };
-                        break;
+                    switch (slotIndex)
+                    {
+                        case 1:
+                            buffer1 = newBuf;
+                            sampleChannel1 = sampleChannel;
+                            out1 = player;
+                            activeId1 = dev.ID;
+                            _slot1Stalled = false;
+                            player.PlaybackStopped += (s, e) => { _slot1Stalled = true; };
+                            break;
+                        case 2:
+                            buffer2 = newBuf;
+                            sampleChannel2 = sampleChannel;
+                            out2 = player;
+                            activeId2 = dev.ID;
+                            _slot2Stalled = false;
+                            player.PlaybackStopped += (s, e) => { _slot2Stalled = true; };
+                            break;
+                        case 3:
+                            buffer3 = newBuf;
+                            sampleChannel3 = sampleChannel;
+                            out3 = player;
+                            activeId3 = dev.ID;
+                            _slot3Stalled = false;
+                            player.PlaybackStopped += (s, e) => { _slot3Stalled = true; };
+                            break;
+                    }
                 }
 
+                UpdateMaxBacklogLimits();
                 player.Play();
             }
             catch (Exception ex)
@@ -662,56 +720,81 @@ namespace SoundPair
 
         private void KillStreamSlot(int slotIndex)
         {
-            switch (slotIndex)
+            lock (_bufferLock)
             {
-                case 1:
-                    _slot1Stalled = true;
-                    try { out1?.Stop(); } catch { }
-                    try { out1?.Dispose(); } catch { }
-                    out1 = null;
-                    buffer1 = null;
-                    sampleChannel1 = null;
-                    activeId1 = null;
-                    break;
-                case 2:
-                    _slot2Stalled = true;
-                    try { out2?.Stop(); } catch { }
-                    try { out2?.Dispose(); } catch { }
-                    out2 = null;
-                    buffer2 = null;
-                    sampleChannel2 = null;
-                    activeId2 = null;
-                    break;
-                case 3:
-                    _slot3Stalled = true;
-                    try { out3?.Stop(); } catch { }
-                    try { out3?.Dispose(); } catch { }
-                    out3 = null;
-                    buffer3 = null;
-                    sampleChannel3 = null;
-                    activeId3 = null;
-                    break;
+                switch (slotIndex)
+                {
+                    case 1:
+                        _slot1Stalled = true;
+                        try { out1?.Stop(); } catch { }
+                        try { out1?.Dispose(); } catch { }
+                        out1 = null;
+                        buffer1 = null;
+                        sampleChannel1 = null;
+                        activeId1 = null;
+                        break;
+                    case 2:
+                        _slot2Stalled = true;
+                        try { out2?.Stop(); } catch { }
+                        try { out2?.Dispose(); } catch { }
+                        out2 = null;
+                        buffer2 = null;
+                        sampleChannel2 = null;
+                        activeId2 = null;
+                        break;
+                    case 3:
+                        _slot3Stalled = true;
+                        try { out3?.Stop(); } catch { }
+                        try { out3?.Dispose(); } catch { }
+                        out3 = null;
+                        buffer3 = null;
+                        sampleChannel3 = null;
+                        activeId3 = null;
+                        break;
+                }
             }
         }
 
-        private void CheckAndResyncSlotBuffer(BufferedWaveProvider? buf, int slotIndex, int targetDelayMs, int bytesPerSec, int blockAlign)
+        private void UpdateMaxBacklogLimits()
+        {
+            if (capture == null) return;
+            int bps = capture.WaveFormat.AverageBytesPerSecond;
+
+            int target1 = (int)((long)((_isSlot1Wireless ? 80 : 40) + Math.Max(0, delay1Ms)) * bps / 1000);
+            _maxBacklogBytes1 = target1 + (int)((long)140 * bps / 1000);
+
+            int target2 = (int)((long)((_isSlot2Wireless ? 80 : 40) + Math.Max(0, delay2Ms)) * bps / 1000);
+            _maxBacklogBytes2 = target2 + (int)((long)140 * bps / 1000);
+
+            int target3 = (int)((long)((_isSlot3Wireless ? 80 : 40) + Math.Max(0, delay3Ms)) * bps / 1000);
+            _maxBacklogBytes3 = target3 + (int)((long)140 * bps / 1000);
+        }
+
+        private void CheckSlotBufferHealth()
+        {
+            if (capture == null || !isStreaming) return;
+            int bps = capture.WaveFormat.AverageBytesPerSecond;
+            int ba = capture.WaveFormat.BlockAlign;
+
+            CheckSlotRecovery(buffer1, 1, delay1Ms, _isSlot1Wireless, bps, ba);
+            CheckSlotRecovery(buffer2, 2, delay2Ms, _isSlot2Wireless, bps, ba);
+            CheckSlotRecovery(buffer3, 3, delay3Ms, _isSlot3Wireless, bps, ba);
+        }
+
+        private void CheckSlotRecovery(BufferedWaveProvider? buf, int slotIndex, int delayMs, bool isWireless, int bps, int ba)
         {
             if (buf == null) return;
+            int basePadding = isWireless ? 80 : 40;
+            int targetBytes = (int)((long)(basePadding + Math.Max(0, delayMs)) * bps / 1000);
+            targetBytes -= (targetBytes % ba);
 
-            int targetBytes = (int)((long)(BaseDelayMs + Math.Max(0, targetDelayMs)) * bytesPerSec / 1000);
-            targetBytes -= (targetBytes % blockAlign);
-
-            // If the buffer has accumulated more than 150ms of stale backlog past its target (e.g. headset paused for phone call)
-            int maxAllowedBacklog = targetBytes + (int)((long)150 * bytesPerSec / 1000);
-            if (buf.BufferedBytes > maxAllowedBacklog)
+            // If a buffer completely drained to 0 (underrun because headset was out of range),
+            // restore its target padding of silence so when it catches up it plays in perfect sync
+            if (buf.BufferedBytes == 0 && targetBytes > 0)
             {
-                buf.ClearBuffer();
-                if (targetBytes > 0)
-                {
-                    int toAdd = Math.Min(targetBytes, SilenceBuffer.Length);
-                    buf.AddSamples(SilenceBuffer, 0, toAdd);
-                }
-                Debug.WriteLine($"[SyncGuard] Auto-resynced buffer for Slot {slotIndex} (flushed stale audio backlog)");
+                int toAdd = Math.Min(targetBytes, SilenceBuffer.Length);
+                try { buf.AddSamples(SilenceBuffer, 0, toAdd); } catch { }
+                Debug.WriteLine($"[SyncGuard] Restored sync padding for Slot {slotIndex}");
             }
         }
 
@@ -1396,8 +1479,9 @@ namespace SoundPair
 
             if (_calActiveSlot == 0)
             {
-                // Global section: show PC Speaker Mute option, hide slot delay sliders
+                // Global section: show PC Speaker Mute & Auto Video Sync options, hide slot delay sliders
                 if (borderGlobalSpeakerCard != null) borderGlobalSpeakerCard.IsVisible = true;
+                if (borderGlobalSyncCard != null) borderGlobalSyncCard.IsVisible = true;
                 if (borderSlotDelayCard != null) borderSlotDelayCard.IsVisible = false;
 
                 if (lblCalModeHeader != null) lblCalModeHeader.Text = "Target: ";
@@ -1442,8 +1526,9 @@ namespace SoundPair
                 return;
             }
 
-            // Hide global PC speaker card in individual slot mode
+            // Hide global PC speaker card & global sync card in individual slot mode
             if (borderGlobalSpeakerCard != null) borderGlobalSpeakerCard.IsVisible = false;
+            if (borderGlobalSyncCard != null) borderGlobalSyncCard.IsVisible = false;
 
             if (lblCalModeHeader != null) lblCalModeHeader.Text = $"Slot {_calActiveSlot}: ";
             if (btnClearSaved != null) ToolTip.SetTip(btnClearSaved, $"Clear saved calibration profile for Slot {_calActiveSlot} and reset delay to 0 ms");
@@ -2057,8 +2142,7 @@ namespace SoundPair
                 }
 
                 // 1. Set global Media Lip-Sync Offset
-                globalOffsetMs = finalLatency;
-                if (lblGlobalOffset != null) lblGlobalOffset.Text = globalOffsetMs > 0 ? $"-{globalOffsetMs} ms" : "0 ms";
+                UpdateGlobalOffset(finalLatency);
 
                 // 2. Calibrate and save all active devices to this latency
                 if (d1 != null) SaveDeviceProfile(d1.FriendlyName, finalLatency);
@@ -2121,8 +2205,7 @@ namespace SoundPair
                 SetSlotDelay(1, 0, applyIfStreaming: false);
                 SetSlotDelay(2, 0, applyIfStreaming: false);
                 SetSlotDelay(3, 0, applyIfStreaming: false);
-                globalOffsetMs = 0;
-                if (lblGlobalOffset != null) lblGlobalOffset.Text = "0 ms";
+                UpdateGlobalOffset(0);
 
                 if (isStreaming)
                 {
@@ -2185,6 +2268,93 @@ namespace SoundPair
 
         #endregion
 
+        #region Auto Audio-Video Sync (Milestone 2)
+
+        private void UpdateGlobalOffset(int newOffset)
+        {
+            globalOffsetMs = Math.Max(0, newOffset);
+            if (lblGlobalOffset != null)
+            {
+                lblGlobalOffset.Text = globalOffsetMs > 0 ? $"-{globalOffsetMs} ms" : "0 ms";
+            }
+            _browserSyncServer.CurrentOffsetMs = globalOffsetMs;
+            if (isStreaming && globalOffsetMs > 0 && _mediaPlayerSyncService.IsAutoSyncEnabled)
+            {
+                _ = _mediaPlayerSyncService.TrySyncActivePlayersAsync(globalOffsetMs);
+            }
+        }
+
+        private async void BtnAutoSyncPlayer_Click(object? sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (btnAutoSyncPlayer != null)
+                {
+                    btnAutoSyncPlayer.IsEnabled = false;
+                    btnAutoSyncPlayer.Content = "Syncing...";
+                }
+
+                string result = await _mediaPlayerSyncService.TrySyncActivePlayersAsync(globalOffsetMs, force: true);
+                if (lblPlayerSyncStatus != null)
+                {
+                    lblPlayerSyncStatus.Text = result;
+                    lblPlayerSyncStatus.Foreground = result.StartsWith("🟢")
+                        ? Brushes.LightGreen
+                        : new SolidColorBrush(Color.FromRgb(160, 174, 192));
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[BtnAutoSyncPlayer Error] {ex.Message}");
+            }
+            finally
+            {
+                await Task.Delay(500);
+                if (btnAutoSyncPlayer != null)
+                {
+                    btnAutoSyncPlayer.IsEnabled = true;
+                    btnAutoSyncPlayer.Content = "⚡ Sync Player";
+                }
+            }
+        }
+
+        private void BtnExtensionHelp_Click(object? sender, RoutedEventArgs e)
+        {
+            try
+            {
+                string extDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "browser_extension");
+                if (!Directory.Exists(extDir))
+                {
+                    string fallback = Path.Combine(Directory.GetCurrentDirectory(), "browser_extension");
+                    if (Directory.Exists(fallback)) extDir = fallback;
+                }
+
+                if (Directory.Exists(extDir))
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "explorer.exe",
+                        Arguments = $"\"{extDir}\"",
+                        UseShellExecute = true
+                    });
+                }
+                else
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "https://github.com/tousifkhan-web/SoundPair#readme",
+                        UseShellExecute = true
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ExtensionHelp Error] {ex.Message}");
+            }
+        }
+
+        #endregion
+
         private async void BtnCopyOffset_Click(object? sender, RoutedEventArgs e)
         {
             try
@@ -2219,13 +2389,6 @@ namespace SoundPair
             if (dev1 == null && dev2 == null && dev3 == null)
             {
                 ShowWarning("Please select at least one active output.");
-                return;
-            }
-
-            int wirelessCount = new[] { dev1, dev2, dev3 }.Count(d => d != null && IsWirelessDevice(d));
-            if (wirelessCount > 2)
-            {
-                ShowWarning("Maximum of 2 wireless Bluetooth devices allowed simultaneously to prevent bandwidth bottleneck.");
                 return;
             }
 
@@ -2282,7 +2445,7 @@ namespace SoundPair
                 if (dev3 != null) StartSlotPlayback(3, dev3);
 
                 byte[] transferBuffer = new byte[8192];
-                long lastResyncTick = Stopwatch.GetTimestamp();
+                UpdateMaxBacklogLimits();
 
                 capture.DataAvailable += (buffer, flags, devicePosition, qpcPosition) =>
                 {
@@ -2297,40 +2460,29 @@ namespace SoundPair
 
                             buffer.CopyTo(transferBuffer);
 
-                            // Independent, lock-free writes per slot:
-                            // Prevents crackling/buffer underruns on healthy devices when one Bluetooth headset switches/stalls
+                            // Independent, lock-free, isolated writes per slot:
+                            // When one headset moves to a distance, its buffer hits its backlog cap.
+                            // Dropping packets for only that struggling headset prevents Bluetooth 
+                            // radio exhaustion and ensures the near headset never stutters or pauses!
                             var b1 = buffer1;
-                            if (b1 != null && !_slot1Stalled)
+                            if (b1 != null && !_slot1Stalled && b1.BufferedBytes <= _maxBacklogBytes1)
                             {
                                 try { b1.AddSamples(transferBuffer, 0, buffer.Length); }
                                 catch { _slot1Stalled = true; }
                             }
 
                             var b2 = buffer2;
-                            if (b2 != null && !_slot2Stalled)
+                            if (b2 != null && !_slot2Stalled && b2.BufferedBytes <= _maxBacklogBytes2)
                             {
                                 try { b2.AddSamples(transferBuffer, 0, buffer.Length); }
                                 catch { _slot2Stalled = true; }
                             }
 
                             var b3 = buffer3;
-                            if (b3 != null && !_slot3Stalled)
+                            if (b3 != null && !_slot3Stalled && b3.BufferedBytes <= _maxBacklogBytes3)
                             {
                                 try { b3.AddSamples(transferBuffer, 0, buffer.Length); }
                                 catch { _slot3Stalled = true; }
-                            }
-
-                            // Anti-drift SyncGuard: check every ~100ms to flush stale accumulated audio if a device paused/reconnected
-                            long now = Stopwatch.GetTimestamp();
-                            if ((now - lastResyncTick) * 1000 / Stopwatch.Frequency > 100)
-                            {
-                                lastResyncTick = now;
-                                int bps = capture.WaveFormat.AverageBytesPerSecond;
-                                int ba = capture.WaveFormat.BlockAlign;
-
-                                if (b1 != null && !_slot1Stalled) CheckAndResyncSlotBuffer(b1, 1, delay1Ms, bps, ba);
-                                if (b2 != null && !_slot2Stalled) CheckAndResyncSlotBuffer(b2, 2, delay2Ms, bps, ba);
-                                if (b3 != null && !_slot3Stalled) CheckAndResyncSlotBuffer(b3, 3, delay3Ms, bps, ba);
                             }
                         }
                     }
@@ -2353,6 +2505,15 @@ namespace SoundPair
                 comboDevice1.IsEnabled = comboDevice2.IsEnabled = comboDevice3.IsEnabled = false;
                 lblStatus.Text = "Status: Streaming live audio";
                 lblStatus.Foreground = Brushes.LightGreen;
+
+                // Sync with Browser Extension and active Media Players
+                _browserSyncServer.IsStreaming = true;
+                _browserSyncServer.CurrentOffsetMs = globalOffsetMs;
+                if (globalOffsetMs > 0 && _mediaPlayerSyncService.IsAutoSyncEnabled)
+                {
+                    _ = _mediaPlayerSyncService.TrySyncActivePlayersAsync(globalOffsetMs);
+                }
+                _mediaPlayerWatcherTimer?.Start();
             }
             catch (Exception ex)
             {
@@ -2576,6 +2737,7 @@ namespace SoundPair
                 _isUpdatingDelayText = false;
             }
 
+            UpdateMaxBacklogLimits();
             if (applyIfStreaming && isStreaming)
             {
                 DebounceApplyDelays();
@@ -2615,9 +2777,10 @@ namespace SoundPair
             if (capture == null) return;
             int blockAlign = capture.WaveFormat.BlockAlign;
 
-            ApplyBufferDelay(buffer1, BaseDelayMs + delay1Ms, blockAlign);
-            ApplyBufferDelay(buffer2, BaseDelayMs + delay2Ms, blockAlign);
-            ApplyBufferDelay(buffer3, BaseDelayMs + delay3Ms, blockAlign);
+            ApplyBufferDelay(buffer1, (_isSlot1Wireless ? 80 : 40) + delay1Ms, blockAlign);
+            ApplyBufferDelay(buffer2, (_isSlot2Wireless ? 80 : 40) + delay2Ms, blockAlign);
+            ApplyBufferDelay(buffer3, (_isSlot3Wireless ? 80 : 40) + delay3Ms, blockAlign);
+            UpdateMaxBacklogLimits();
         }
 
         private void ApplyBufferDelay(BufferedWaveProvider? buf, int delayMs, int blockAlign)
@@ -2639,6 +2802,9 @@ namespace SoundPair
 
         private void BtnStop_Click(object? sender, RoutedEventArgs? e)
         {
+            _mediaPlayerWatcherTimer?.Stop();
+            _mediaPlayerSyncService.ResetSyncedTracking();
+
             if (defaultRenderDevice != null)
             {
                 try { defaultRenderDevice.AudioEndpointVolume.OnVolumeNotification -= OnSystemVolumeNotification; } catch { }
@@ -2664,6 +2830,7 @@ namespace SoundPair
             sampleChannel1 = sampleChannel2 = sampleChannel3 = null;
             activeId1 = activeId2 = activeId3 = null;
             _slot1Stalled = _slot2Stalled = _slot3Stalled = false;
+            _maxBacklogBytes1 = _maxBacklogBytes2 = _maxBacklogBytes3 = int.MaxValue;
 
             isStreaming = false;
             btnStart.IsEnabled = true;
@@ -2674,45 +2841,66 @@ namespace SoundPair
             comboDevice1.IsEnabled = comboDevice2.IsEnabled = comboDevice3.IsEnabled = true;
             lblStatus.Text = "Status: Stopped";
             lblStatus.Foreground = TextSecBrush;
+
+            _browserSyncServer.IsStreaming = false;
+            if (lblPlayerSyncStatus != null)
+            {
+                lblPlayerSyncStatus.Text = "⚡ Auto-Sync: Idle (Ready for PotPlayer / VLC / MPC-HC)";
+                lblPlayerSyncStatus.Foreground = new SolidColorBrush(Color.FromRgb(160, 174, 192));
+            }
         }
 
         #endregion
 
         protected override void OnClosing(WindowClosingEventArgs e)
         {
-            debounceTimer?.Stop();
-            debounceTimer = null;
-            _delayDebounceTimer?.Stop();
-            _delayDebounceTimer = null;
-
-            if (_hwnd != IntPtr.Zero && _subclassProc != null)
+            try
             {
-                RemoveWindowSubclass(_hwnd, _subclassProc, (UIntPtr)101);
+                _mediaPlayerWatcherTimer?.Stop();
+                _mediaPlayerWatcherTimer = null;
+                _browserSyncServer.Stop();
+
+                debounceTimer?.Stop();
+                debounceTimer = null;
+                _delayDebounceTimer?.Stop();
+                _delayDebounceTimer = null;
+
+                if (_hwnd != IntPtr.Zero && _subclassProc != null)
+                {
+                    RemoveWindowSubclass(_hwnd, _subclassProc, (UIntPtr)101);
+                }
             }
+            catch { }
 
             base.OnClosing(e);
         }
 
         protected override void OnClosed(EventArgs e)
         {
-            CloseSidePanel(true);
-            UnbindAllDevices();
-
-            if (_trayIcon != null)
+            try
             {
-                _trayIcon.IsVisible = false;
-                _trayIcon.Dispose();
-                _trayIcon = null;
-            }
+                CloseSidePanel(true);
+                UnbindAllDevices();
 
-            RestoreOriginalDefaultDevice();
+                if (_trayIcon != null)
+                {
+                    _trayIcon.IsVisible = false;
+                    _trayIcon.Dispose();
+                    _trayIcon = null;
+                }
 
-            BtnStop_Click(null, null);
-            foreach (var d in _cachedDevices)
-            {
-                try { d.Dispose(); } catch { }
+                RestoreOriginalDefaultDevice();
+
+                BtnStop_Click(null, null);
+                foreach (var d in _cachedDevices)
+                {
+                    try { d.Dispose(); } catch { }
+                }
+                _cachedDevices.Clear();
+
+                _browserSyncServer.Dispose();
             }
-            _cachedDevices.Clear();
+            catch { }
 
             base.OnClosed(e);
         }

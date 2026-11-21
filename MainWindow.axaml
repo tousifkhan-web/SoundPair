@@ -614,6 +614,36 @@
                         </Grid>
                     </Border>
 
+                    <!-- Global Video & Media Player Sync Card (Global Calibration Section) -->
+                    <Border x:Name="borderGlobalSyncCard" Background="#252525" CornerRadius="5" BorderBrush="#383838" BorderThickness="1" Padding="10,8" Margin="0,0,0,5" IsVisible="True">
+                        <StackPanel Spacing="6">
+                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                <TextBlock Text="🎬" FontFamily="Segoe UI Emoji, Segoe UI Symbol, sans-serif" FontSize="12" VerticalAlignment="Center"/>
+                                <TextBlock Text="Auto Video Sync (Media &amp; Browser)" FontSize="12" FontWeight="SemiBold" Foreground="#FFFFFF" VerticalAlignment="Center"/>
+                            </StackPanel>
+
+                            <!-- Live Auto-Sync Status Message -->
+                            <TextBlock x:Name="lblPlayerSyncStatus" Text="⚡ Auto-Sync: Ready (VLC / PotPlayer / MPC-HC)" FontSize="11" Foreground="#A0AEC0"/>
+
+                            <!-- Action Buttons: Sync Player & Browser Extension -->
+                            <Grid Margin="0,2,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Button x:Name="btnAutoSyncPlayer" Grid.Column="0" Content="⚡ Sync Player" Height="28"
+                                        Background="#23425A" Foreground="#63B3ED" BorderBrush="#3182CE" BorderThickness="1"
+                                        Classes="DarkButton" Click="BtnAutoSyncPlayer_Click" HorizontalAlignment="Stretch"
+                                        FontSize="11.5" ToolTip.Tip="Inject current offset into active PotPlayer, VLC, or MPC-HC"/>
+                                <Button x:Name="btnExtensionHelp" Grid.Column="2" Content="🌐 Browser Extension" Height="28"
+                                        Background="#1E293B" Foreground="#38BDF8" BorderBrush="#0284C7" BorderThickness="1"
+                                        Classes="DarkButton" Click="BtnExtensionHelp_Click" HorizontalAlignment="Stretch"
+                                        FontSize="11.5" ToolTip.Tip="Open Browser Extension folder to install in Chrome, Edge, or Firefox"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
                     <!-- Hardware Delay Offset Card (Individual Slot Only - Dynamic Numeric Input + Steppers) -->
                     <Border x:Name="borderSlotDelayCard" Background="#252525" CornerRadius="5" BorderBrush="#383838" BorderThickness="1" Padding="8,6" Margin="0,0,0,2" IsVisible="False">
                         <StackPanel>

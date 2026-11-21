@@ -58,31 +58,33 @@ When streaming starts, SoundPair automatically silences your internal PC speaker
    - **Device Slot 1 (Primary)**
    - **Device Slot 2 (Optional / Adjustable)**
    - **Device Slot 3 (Optional / Adjustable)**
-3. Choose the audio devices you want to stream to (select 1, 2, or all 3 slots).
+3. Choose the audio devices you want to stream to (supports up to **3 wireless Bluetooth audio devices** simultaneously with zero connection limits).
 
 ### Step 4: Calibrate & Fine-Tune Audio Delays
 
 - **Visual Calibration Studio (Ball Drop & Spacebar Sync):** Click **🌐 Global Calibration** (or the **🎯 Cal** button beside any device slot) to open the calibration drawer. Put on your headset, watch the ball drop down the chute, and tap the **[Spacebar]** the instant you hear the audio click. SoundPair averages your tap responses, compensates for human reaction time, and automatically balances delay offsets across all active outputs.
 - **Persistent Device Profiles:** Calibrated delays are automatically saved to `device_profiles.json`. When you reconnect or select the same device in the future, SoundPair instantly recalls your calibration profile.
 - **Manual Delay Controls:** Use the `- 10 ms`, `+ 10 ms`, or direct numeric input box for each slot to manually nudge or fine-tune synchronization with zero slider limit constraints. Click the `↺ 0` button to instantly reset any slot back to 0 ms.
-- **Media Player Lip-Sync Offset:** When balancing outputs requires buffering, SoundPair calculates the exact audio-to-video delay compensation for video players (VLC, PotPlayer, MPC-HC) with one-click clipboard copying.
+- **Desktop Media Player Lip-Sync Auto-Sync:** When balancing outputs requires buffering, SoundPair calculates the exact audio-to-video delay compensation. Click **⚡ Sync Player** inside Global Calibration (or let SoundPair auto-sync automatically in the background) to inject the exact negative delay into active players (**PotPlayer**, **VLC**, **MPC-HC**, and **MPV**).
+- **Web Browser Video Sync (YouTube / Netflix / Prime Video):** Install the official companion extension (**SoundPair**) in Chrome, Edge, Brave, or Firefox (available on Mozilla Add-ons). It connects to SoundPair's built-in local sync server (`http://127.0.0.1:48888`) and delays HTML5 video playback to match your Bluetooth headphones' physical latency in real-time.
 - **Independent Volume Controls:** Adjust the dedicated volume sliders (0–100%) for each slot independently, or let them synchronize in real-time with your Windows master volume mixer and keyboard media keys.
 
 ### Step 5: Start Streaming
 
-Click the **Start Streaming** button. SoundPair executes a fast Bluetooth radio warmup handshake to prevent cold-start desyncs, establishes low-latency WASAPI loopback streams, and routes audio to all selected devices in perfect synchronization!
+Click the **Start Streaming** button. SoundPair executes a fast Bluetooth radio warmup handshake to wake up all wireless radios, establishes low-latency WASAPI loopback streams, and routes audio to all selected devices in perfect synchronization!
 
 ---
 
 ## ✨ Key Features
 
-- **Tri-Device Simultaneous Streaming:** Route Windows audio to up to 3 separate playback outputs (wired, USB, or Bluetooth) at the same time.
+- **Tri-Device & Tri-Wireless Simultaneous Streaming:** Route Windows audio to up to 3 separate playback outputs simultaneously—supporting up to 3 wireless Bluetooth headsets or speakers with independent lock-free buffer underrun protection.
+- **Automated Desktop Media Player Lip-Sync:** Background process detection and automated video delay injection for **PotPlayer**, **VLC**, **MPC-HC**, and **MPV**.
+- **Official SoundPair Browser Extension:** Real-time HTML5 video delay synchronization for YouTube, Netflix, Prime Video, Disney+, Twitch, and any web video player.
 - **Zero Drivers Required:** Native Windows 11 Process Loopback captures clean audio with zero extra software or virtual cables installed.
 - **Interactive Visual Calibration Studio:** Visual ball-drop animation with synchronized audio pulses and spacebar reaction timing. Eliminates unreliable microphone acoustic chirps and room noise interference.
 - **Persistent Device Profiles:** Automatically saves device latency profiles (`device_profiles.json`) and auto-loads balanced delay configurations whenever recognized devices are selected.
 - **Auto-Balanced Multi-Device Delay:** Intelligently identifies the slowest audio device, computes the required buffer padding for faster devices, and adjusts delay sliders automatically.
 - **Manual Millisecond Delay Controls:** Stepper buttons (`- 10 ms`, `+ 10 ms`, `↺ 0`) and direct numeric millisecond input per slot to eliminate echo or drift between disparate hardware models without artificial range restrictions.
-- **Media Player Lip-Sync Offset:** Computes and displays the exact audio-to-video offset for VLC (`J`/`K`), PotPlayer (`Shift + >`/`<`), and MPC-HC (`Shift + +/-`) with one-click clipboard copying.
 - **Dynamic Sample-Rate Conversion (WDL Resampling):** Integrated NAudio `WdlResamplingSampleProvider` automatically converts and matches sample rates (e.g., 44.1 kHz, 48 kHz, 96 kHz) across mixed hardware without audio degradation or pitch glitches.
 - **Independent & Synchronized Volume Controls:** Dedicated volume percentage sliders for Device Slots 1, 2, and 3, linked bidirectionally with Windows endpoint volume notifications in real-time.
 - **Dynamic Hardware Detection:** Actively listens for Windows device arrival and removal events (`WM_DEVICECHANGE`) to refresh device lists dynamically without requiring an app restart.
