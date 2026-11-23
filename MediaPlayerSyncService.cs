@@ -10,6 +10,23 @@ using System.Threading.Tasks;
 
 namespace SoundPair
 {
+    /// <summary>
+    /// MediaPlayerSyncService automatically synchronizes video playback in external desktop
+    /// media players with SoundPair's global audio latency offset.
+    /// 
+    /// Supported Players & Protocols:
+    /// 1. PotPlayer: Win32 PostMessage(WM_COMMAND) with native command IDs:
+    ///    - 10190: Reset audio delay to 0ms
+    ///    - 10191: Audio sync faster (-50ms per step, effectively delaying video)
+    /// 2. MPC-HC / MPC-BE: Win32 PostMessage(WM_COMMAND) with native command IDs:
+    ///    - 907: Reset audio delay to 0ms
+    ///    - 906: Audio delay minus (-10ms per step)
+    /// 3. VLC Media Player:
+    ///    - Primary: HTTP JSON API on localhost:8080 (audiodelay command)
+    ///    - Fallback: Non-blocking Win32 WM_KEYDOWN/WM_KEYUP keystrokes with cached vlcrc hotkey extraction
+    /// 4. MPV / MPV.net:
+    ///    - Local Windows Named Pipe IPC (\\.\pipe\mpvsocket) sending JSON-RPC: {"command": ["set_property", "audio-delay", offset]}
+    /// </summary>
     public class MediaPlayerSyncService
     {
         #region Win32 Imports
@@ -45,12 +62,12 @@ namespace SoundPair
         // Concurrency lock to prevent concurrent sync operations from colliding or freezing
         private readonly SemaphoreSlim _syncLock = new SemaphoreSlim(1, 1);
 
-        // Process & Offset state tracking
+        // Process & Offset state tracking: Prevents sending redundant messages when offset hasn't changed
         private int _syncedPid = 0;
         private string _syncedPlayerType = string.Empty;
         private int _syncedOffset = 0;
 
-        // Cached VLC hotkeys to avoid constant disk I/O
+        // Cached VLC hotkeys to avoid constant disk I/O on vlcrc configuration file
         private char _cachedVlcDown = 'J';
         private char _cachedVlcUp = 'K';
         private long _lastVlcrcCheckTime = 0;
@@ -59,6 +76,9 @@ namespace SoundPair
 
         public bool IsAutoSyncEnabled { get; set; } = true;
 
+        /// <summary>
+        /// Detects any active desktop media player process and applies the calibrated delay offset.
+        /// </summary>
         public async Task<string> TrySyncActivePlayersAsync(int offsetMs, bool force = false)
         {
             if (offsetMs < 0) offsetMs = 0;

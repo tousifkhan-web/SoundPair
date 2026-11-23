@@ -7,6 +7,21 @@ using System.Threading.Tasks;
 
 namespace SoundPair
 {
+    /// <summary>
+    /// BrowserSyncServer is a lightweight, embedded loopback HTTP server.
+    /// 
+    /// Purpose:
+    /// In multi-headset streaming (especially over Bluetooth), audio latency typically ranges
+    /// from 80ms to 250ms. When users watch videos on YouTube, Netflix, or web-based media players,
+    /// audio can arrive slightly later than video (lip-sync mismatch).
+    /// 
+    /// How it works:
+    /// 1. Listens on http://127.0.0.1:48888 (with automatic port increment fallback if occupied).
+    /// 2. SoundPair's Companion Browser Extension (Chrome/Edge/Firefox) queries GET /offset or /status.
+    /// 3. Returns the master calibrated Global Latency Offset in JSON: { "offsetMs": 150, "isStreaming": true }.
+    /// 4. The extension automatically delays HTML5 <video> frames by that exact offset, providing flawless lip-sync.
+    /// 5. Full Cross-Origin Resource Sharing (CORS) headers are included to support all browser extensions.
+    /// </summary>
     public class BrowserSyncServer : IDisposable
     {
         private HttpListener? _listener;
@@ -15,13 +30,28 @@ namespace SoundPair
         private volatile bool _isRunning = false;
         private readonly object _lock = new object();
 
+        /// <summary>
+        /// Current global video-delay offset in milliseconds to broadcast to the browser extension.
+        /// </summary>
         public int CurrentOffsetMs { get; set; } = 0;
+
+        /// <summary>
+        /// Streaming state flag indicating whether SoundPair is actively outputting audio.
+        /// </summary>
         public bool IsStreaming { get; set; } = false;
+
+        /// <summary>
+        /// Active desktop or web media player status description.
+        /// </summary>
         public string ActivePlayerStatus { get; set; } = "None";
 
         public int Port => _port;
         public bool IsRunning => _isRunning;
 
+        /// <summary>
+        /// Starts the HTTP loopback listener on the preferred port.
+        /// If the port is in use, it attempts up to 3 fallback ports sequentially (e.g. 48888, 48889, 48890).
+        /// </summary>
         public void Start(int preferredPort = 48888)
         {
             lock (_lock)
@@ -43,6 +73,7 @@ namespace SoundPair
                         _isRunning = true;
                         Debug.WriteLine($"[BrowserSyncServer] Started on http://127.0.0.1:{_port}/");
 
+                        // Spawn background listen loop
                         Task.Run(() => ListenLoopAsync(listener, _cts.Token));
                         return;
                     }
@@ -55,21 +86,24 @@ namespace SoundPair
             }
         }
 
+        /// <summary>
+        /// Asynchronous listen loop that accepts incoming HTTP requests without blocking threads.
+        /// </summary>
         private async Task ListenLoopAsync(HttpListener listener, CancellationToken token)
         {
             while (!token.IsCancellationRequested && _isRunning)
             {
                 try
                 {
-                    // If listener is stopping, safely exit
                     if (!listener.IsListening) break;
 
                     var context = await listener.GetContextAsync();
+                    // Process each request asynchronously on thread pool
                     _ = Task.Run(() => HandleRequestSafe(context));
                 }
                 catch (HttpListenerException)
                 {
-                    // Normal during shutdown/port close
+                    // Normal during server shutdown or port close
                     break;
                 }
                 catch (ObjectDisposedException)
@@ -86,6 +120,9 @@ namespace SoundPair
             }
         }
 
+        /// <summary>
+        /// Handles incoming HTTP GET / OPTIONS requests and replies with JSON sync data.
+        /// </summary>
         private void HandleRequestSafe(HttpListenerContext context)
         {
             HttpListenerResponse? res = null;
@@ -99,6 +136,7 @@ namespace SoundPair
                 res.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
                 res.Headers.Add("Access-Control-Allow-Headers", "Content-Type");
 
+                // Handle CORS pre-flight OPTIONS request
                 if (req.HttpMethod == "OPTIONS")
                 {
                     res.StatusCode = (int)HttpStatusCode.NoContent;
@@ -107,6 +145,7 @@ namespace SoundPair
 
                 string path = req.Url?.AbsolutePath.ToLowerInvariant() ?? "/";
 
+                // Return sync offset and status
                 if (path == "/" || path == "/offset" || path == "/status")
                 {
                     res.ContentType = "application/json; charset=utf-8";
@@ -128,7 +167,7 @@ namespace SoundPair
             }
             finally
             {
-                // Always close response to prevent unmanaged connection leaks
+                // Always close response stream to prevent unmanaged socket handle leaks
                 try
                 {
                     res?.Close();
@@ -143,6 +182,9 @@ namespace SoundPair
             return s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", " ").Replace("\r", "");
         }
 
+        /// <summary>
+        /// Stops the HTTP listener and releases network resources.
+        /// </summary>
         public void Stop()
         {
             lock (_lock)

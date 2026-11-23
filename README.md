@@ -60,16 +60,23 @@ When streaming starts, SoundPair automatically silences your internal PC speaker
    - **Device Slot 3 (Optional / Adjustable)**
 3. Choose the audio devices you want to stream to (supports up to **3 wireless Bluetooth audio devices** simultaneously with zero connection limits).
 
-### Step 4: Calibrate & Fine-Tune Audio Delays
+### Step 4: Dual-Pairing (Multipoint) Call Pause & Zero-Drift Resume
 
-- **Visual Calibration Studio (Ball Drop & Spacebar Sync):** Click **🌐 Global Calibration** (or the **🎯 Cal** button beside any device slot) to open the calibration drawer. Put on your headset, watch the ball drop down the chute, and tap the **[Spacebar]** the instant you hear the audio click. SoundPair averages your tap responses, compensates for human reaction time, and automatically balances delay offsets across all active outputs.
+- **Dedicated Per-Slot Pause Buttons (`⏸ Pause / ▶ Resume`):** Next to each device dropdown, a dedicated hardware pause button allows you to instantly halt streaming to that specific headset without affecting the other connected outputs.
+- **Bluetooth Radio Airtime Protection:** When a dual-pairing headset switches to your phone for an incoming call, clicking **Pause** halts WASAPI frame generation and clears its buffer. This immediately stops Windows from sending unacknowledged Bluetooth packets, preventing radio contention and ensuring the other active headset continues playing smoothly with **zero sound breaks, stuttering, or pauses**.
+- **Zero-Drift Resume Guarantee:** When your phone call ends, clicking **▶ Resume** flushes any stale audio and pre-fills the exact calibrated silence padding, resuming playback in instantaneous, perfect sync with your other outputs and video.
+
+### Step 5: Calibrate & Fine-Tune Audio Delays
+
+- **Visual Calibration Studio (Ball Drop & Spacebar Sync):** Click **🌐 Global Calibration** below the device slots to open the visual calibration drawer. Put on your headset, watch the ball drop down the chute, and tap the **[Spacebar]** the instant you hear the audio click. SoundPair averages your tap responses, compensates for human reaction time, and automatically balances delay offsets across all active outputs.
+- **Individual Slot Calibration Tabs:** Inside the drawer, easily switch between **🌐 Global**, **Slot 1**, **Slot 2**, and **Slot 3** tabs to fine-tune individual device offsets.
 - **Persistent Device Profiles:** Calibrated delays are automatically saved to `device_profiles.json`. When you reconnect or select the same device in the future, SoundPair instantly recalls your calibration profile.
 - **Manual Delay Controls:** Use the `- 10 ms`, `+ 10 ms`, or direct numeric input box for each slot to manually nudge or fine-tune synchronization with zero slider limit constraints. Click the `↺ 0` button to instantly reset any slot back to 0 ms.
 - **Desktop Media Player Lip-Sync Auto-Sync:** When balancing outputs requires buffering, SoundPair calculates the exact audio-to-video delay compensation. Click **⚡ Sync Player** inside Global Calibration (or let SoundPair auto-sync automatically in the background) to inject the exact negative delay into active players (**PotPlayer**, **VLC**, **MPC-HC**, and **MPV**).
 - **Web Browser Video Sync (YouTube / Netflix / Prime Video):** Install the official companion extension (**SoundPair**) in Chrome, Edge, Brave, or Firefox (available on Mozilla Add-ons). It connects to SoundPair's built-in local sync server (`http://127.0.0.1:48888`) and delays HTML5 video playback to match your Bluetooth headphones' physical latency in real-time.
 - **Independent Volume Controls:** Adjust the dedicated volume sliders (0–100%) for each slot independently, or let them synchronize in real-time with your Windows master volume mixer and keyboard media keys.
 
-### Step 5: Start Streaming
+### Step 6: Start Streaming
 
 Click the **Start Streaming** button. SoundPair executes a fast Bluetooth radio warmup handshake to wake up all wireless radios, establishes low-latency WASAPI loopback streams, and routes audio to all selected devices in perfect synchronization!
 
@@ -78,6 +85,10 @@ Click the **Start Streaming** button. SoundPair executes a fast Bluetooth radio 
 ## ✨ Key Features
 
 - **Tri-Device & Tri-Wireless Simultaneous Streaming:** Route Windows audio to up to 3 separate playback outputs simultaneously—supporting up to 3 wireless Bluetooth headsets or speakers with independent lock-free buffer underrun protection.
+- **Dual-Pairing (Multipoint) Call Pause & Resume:** Dedicated `⏸ Pause / ▶ Resume` buttons per slot that instantly stop transmission to a headset during a phone call, freeing 100% of the PC's Bluetooth radio airtime to prevent breaking or stuttering on other headsets.
+- **Zero-Drift Synchronization Guarantee:** Automatic buffer clearing and precision silence padding injection ensures resumed streams align instantaneously with active playback without any accumulated latency drift.
+- **Dynamic Mixed-Format Audio Engine (Zero Quality Loss):** Internal 32-bit IEEE Floating-Point master pipeline with studio-grade **Cockos WDL Resampling** (< -120 dB THD+N). Simultaneously drives mixed formats (e.g., 16-bit 44.1 kHz, 24-bit 96 kHz, and 32-bit audio) with full dynamic range and zero phase distortion.
+- **Isolated Backlog Buffering (RF Jitter Protection):** Dynamic 800 ms backlog ceiling per slot isolates struggling or distant wireless headsets, ensuring Bluetooth packet drops on one device never cause audio stutter on others.
 - **Automated Desktop Media Player Lip-Sync:** Background process detection and automated video delay injection for **PotPlayer**, **VLC**, **MPC-HC**, and **MPV**.
 - **Official SoundPair Browser Extension:** Real-time HTML5 video delay synchronization for YouTube, Netflix, Prime Video, Disney+, Twitch, and any web video player.
 - **Zero Drivers Required:** Native Windows 11 Process Loopback captures clean audio with zero extra software or virtual cables installed.
@@ -85,7 +96,6 @@ Click the **Start Streaming** button. SoundPair executes a fast Bluetooth radio 
 - **Persistent Device Profiles:** Automatically saves device latency profiles (`device_profiles.json`) and auto-loads balanced delay configurations whenever recognized devices are selected.
 - **Auto-Balanced Multi-Device Delay:** Intelligently identifies the slowest audio device, computes the required buffer padding for faster devices, and adjusts delay sliders automatically.
 - **Manual Millisecond Delay Controls:** Stepper buttons (`- 10 ms`, `+ 10 ms`, `↺ 0`) and direct numeric millisecond input per slot to eliminate echo or drift between disparate hardware models without artificial range restrictions.
-- **Dynamic Sample-Rate Conversion (WDL Resampling):** Integrated NAudio `WdlResamplingSampleProvider` automatically converts and matches sample rates (e.g., 44.1 kHz, 48 kHz, 96 kHz) across mixed hardware without audio degradation or pitch glitches.
 - **Independent & Synchronized Volume Controls:** Dedicated volume percentage sliders for Device Slots 1, 2, and 3, linked bidirectionally with Windows endpoint volume notifications in real-time.
 - **Dynamic Hardware Detection:** Actively listens for Windows device arrival and removal events (`WM_DEVICECHANGE`) to refresh device lists dynamically without requiring an app restart.
 - **Bluetooth Cold-Start Warmup:** Runs a hardware handshake prior to streaming to wake up dormant Bluetooth radios, eliminating first-launch desync and buffer underruns.

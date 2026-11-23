@@ -3,14 +3,15 @@ using Avalonia;
 
 namespace SoundPair;
 
+/// <summary>
+/// Application entry point and runtime configuration.
+/// </summary>
 internal static class Program
 {
-    // Initialization code. Don't use any Avalonia, third-party APIs or any
-    // SynchronizationContext-reliant code before AppMain is called: things aren't initialized
-    // yet and stuff might break.
     [STAThread]
     public static void Main(string[] args)
     {
+        // 1. Trap unhandled AppDomain exceptions (e.g. unexpected COM audio driver errors)
         AppDomain.CurrentDomain.UnhandledException += (s, e) =>
         {
             try
@@ -21,6 +22,7 @@ internal static class Program
             catch { }
         };
 
+        // 2. Prevent unobserved background task exceptions from terminating the process
         TaskScheduler.UnobservedTaskException += (s, e) =>
         {
             try
@@ -31,15 +33,19 @@ internal static class Program
             catch { }
         };
 
+        // 3. Start Avalonia Desktop application lifetime
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 
-    // Avalonia configuration, don't remove; also used by visual designer.
+    /// <summary>
+    /// Avalonia configuration with Skia GPU acceleration and Inter font rendering.
+    /// </summary>
     public static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<App>()
             .UsePlatformDetect()
             .With(new SkiaOptions
             {
+                // Allocate 256MB GPU memory cache for fluid 60/120Hz ball drop & ripple canvas rendering
                 MaxGpuResourceSizeBytes = 256 * 1024 * 1024
             })
             .WithInterFont()

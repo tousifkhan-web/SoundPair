@@ -20,6 +20,9 @@ public partial class App : Application
         AvaloniaXamlLoader.Load(this);
     }
 
+    /// <summary>
+    /// Configures application lifetime and enforces single-instance process execution.
+    /// </summary>
     public override void OnFrameworkInitializationCompleted()
     {
         // Don't run single-instance mutex check or shutdown in XAML designer preview
@@ -29,6 +32,7 @@ public partial class App : Application
             return;
         }
 
+        // Single-instance named mutex lock scoped to the local session
         const string mutexName = @"Local\{SoundPair-Tri-Audio-Unique-Lock}";
         try
         {
@@ -36,11 +40,13 @@ public partial class App : Application
         }
         catch (AbandonedMutexException)
         {
+            // Mutex was abandoned by a previous crashed instance; we now own it safely
             _ownsMutex = true;
         }
 
         if (!_ownsMutex)
         {
+            // Another instance is already active: inform the user and terminate cleanly
             MessageBoxW(
                 IntPtr.Zero,
                 "Sound Pair is already running in the background!\n\nPlease check your Windows taskbar.",
@@ -63,6 +69,9 @@ public partial class App : Application
         base.OnFrameworkInitializationCompleted();
     }
 
+    /// <summary>
+    /// Clean shutdown hook to restore Windows system default audio device and release Mutex.
+    /// </summary>
     private void OnAppExit(object? sender, ControlledApplicationLifetimeExitEventArgs e)
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop &&

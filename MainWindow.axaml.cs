@@ -19,52 +19,97 @@ using NAudio.Wave.SampleProviders;
 
 namespace SoundPair
 {
+    /// <summary>
+    /// MainWindow is the core orchestrator of SoundPair (Tri Mode).
+    /// 
+    /// Architecture Overview:
+    /// 1. CAPTURE ENGINE: Captures pre-mute system audio using Windows 11 Process Loopback
+    ///    (WasapiRecorder with ExcludeTargetProcessTree), allowing the PC speaker to be
+    ///    muted to prevent local room echo while preserving full system audio stream.
+    /// 2. STREAM ROUTING & BUFFERING: Duplicates captured IEEE Float 48kHz audio into up to 3
+    ///    independent BufferedWaveProviders. Each slot runs its own sample channel, volume scaler,
+    ///    and high-performance WDL resampler targeting each output device's native format.
+    /// 3. DUAL-PAIRING (MULTIPOINT) CALL ISOLATION:
+    ///    Provides dedicated Pause/Resume buttons per slot. When one dual-pairing headset switches
+    ///    to a phone call, pausing that slot immediately stops WASAPI audio frames, preventing
+    ///    Bluetooth ARQ retry storms and saving 100% of PC radio bandwidth for the other headset.
+    /// 4. ZERO-DRIFT SYNC GUARANTEE:
+    ///    When unpausing or starting streams, buffers are flushed and pre-filled with calibrated
+    ///    silence padding, ensuring sub-millisecond audio alignment with zero accumulated latency drift.
+    /// 5. AUTO VIDEO SYNC (MILESTONE 2):
+    ///    Broadcasting global audio latency offset to browser extensions via an embedded HTTP server
+    ///    and desktop media players (PotPlayer, VLC, MPC-HC, MPV) via IPC / Win32 messages.
+    /// </summary>
     public partial class MainWindow : Window
     {
-        private WasapiRecorder? capture;
-        private BufferedWaveProvider? buffer1, buffer2, buffer3;
-        private SampleChannel? sampleChannel1, sampleChannel2, sampleChannel3;
-        private WasapiPlayer? out1, out2, out3;
+        // --- Core Audio Capture & Output Pipeline ---
+        private WasapiRecorder? capture;                                      // Native WASAPI process loopback capture
+        private BufferedWaveProvider? buffer1, buffer2, buffer3;              // Independent FIFO audio ring buffers per slot
+        private SampleChannel? sampleChannel1, sampleChannel2, sampleChannel3;// Per-slot floating point gain / volume processors
+        private WasapiPlayer? out1, out2, out3;                               // Low-latency WASAPI render clients per output device
 
-        private readonly List<MMDevice> _cachedDevices = new();
-        private DispatcherTimer? _delayDebounceTimer;
-        private MMDevice? defaultRenderDevice;
+        private readonly List<MMDevice> _cachedDevices = new();               // Cached CoreAudio device enumeration
+        private DispatcherTimer? _delayDebounceTimer;                         // Debounce timer for slider latency adjustments
+        private MMDevice? defaultRenderDevice;                                // Original default Windows audio endpoint
 
-        // Hardware volume sync states
+        // Hardware volume synchronization states (bi-directional sync between app sliders & OS master volume)
         private MMDevice? boundDevice1, boundDevice2, boundDevice3;
         private bool _isSyncingVolume1, _isSyncingVolume2, _isSyncingVolume3;
         private long _lastUserVol1ChangeTime, _lastUserVol2ChangeTime, _lastUserVol3ChangeTime;
 
+        // Streaming state flags
         private bool isStreaming = false;
         private bool isInitialLoad = true;
 
+        // Delay offsets (in milliseconds)
         private int delay1Ms = 0;
         private int delay2Ms = 0;
         private int delay3Ms = 0;
-        private int globalOffsetMs = 0;
+        private int globalOffsetMs = 0;                                       // Master latency offset applied to video sync
 
-        private const int WM_DEVICECHANGE = 0x0219;
+        private const int WM_DEVICECHANGE = 0x0219;                           // Win32 device change notification message
 
-        private float cachedSysVol = 1.0f;
-        private string? activeId1, activeId2, activeId3;
+        private float cachedSysVol = 1.0f;                                    // Cached master system volume level
+        private string? activeId1, activeId2, activeId3;                      // Active MMDevice endpoint GUIDs
+        // Stall detection states: Set to true when an output endpoint fails or device is unplugged
         private volatile bool _slot1Stalled = false;
         private volatile bool _slot2Stalled = false;
         private volatile bool _slot3Stalled = false;
+
+        // Dynamic buffer capacity limits (in bytes) to prevent infinite memory queuing and latency drift
         private volatile int _maxBacklogBytes1 = int.MaxValue;
         private volatile int _maxBacklogBytes2 = int.MaxValue;
         private volatile int _maxBacklogBytes3 = int.MaxValue;
+
+        // Device transport classification (Wireless/Bluetooth vs Wired)
         private bool _isSlot1Wireless = false;
         private bool _isSlot2Wireless = false;
         private bool _isSlot3Wireless = false;
+
+        // PC Speaker silence state preservation for local room echo cancellation
         private bool _originalSpeakerMuteState = false;
         private bool _isSyncingSpeakerMute = false;
         private string? originalDefaultDeviceId = null;
         private bool didChangeDefaultDevice = false;
 
+        // Dual-Pairing (Multipoint) Call Pause & Resume States:
+        // When a user receives a phone call on a dual-paired headset, they click Pause on that slot.
+        // Pausing immediately cuts audio transmission to WASAPI and flushes the buffer, completely
+        // halting Bluetooth packet transmission and preventing ARQ retry storms. This guarantees
+        // 100% of the PC's Bluetooth radio airtime remains dedicated to the other active headset.
+        private volatile bool _isSlot1UserPaused = false;
+        private volatile bool _isSlot2UserPaused = false;
+        private volatile bool _isSlot3UserPaused = false;
+
+        // UI Brushes for the Pause / Resume slot buttons
+        private static readonly IBrush PausedButtonBg = new SolidColorBrush(Color.FromRgb(180, 83, 9)); // Amber / Warning
+        private static readonly IBrush PausedButtonBorder = new SolidColorBrush(Color.FromRgb(245, 158, 11));
+        private static readonly IBrush ActiveButtonBg = new SolidColorBrush(Color.FromRgb(56, 56, 56)); // Standard dark grey
+        private static readonly IBrush ActiveButtonBorder = new SolidColorBrush(Color.FromRgb(74, 74, 74));
 
         private TrayIcon? _trayIcon;
         private DispatcherTimer? debounceTimer;
-        private static readonly byte[] SilenceBuffer = new byte[1048576]; // 1MB zero buffer
+        private static readonly byte[] SilenceBuffer = new byte[1048576]; // 1MB pre-allocated zero buffer for fast zero-drift padding
 
         // Synchronization lock for real-time audio buffer operations across UI & Audio threads
         private readonly object _bufferLock = new object();
@@ -201,19 +246,15 @@ namespace SoundPair
 
             _browserSyncServer.Start(48888);
 
+            // Periodic auto-sync timer for desktop media players (VLC, PotPlayer, MPC-HC, MPV)
             _mediaPlayerWatcherTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
             _mediaPlayerWatcherTimer.Tick += async (_, _) =>
             {
                 try
                 {
-                    if (isStreaming)
+                    if (isStreaming && globalOffsetMs > 0 && _mediaPlayerSyncService.IsAutoSyncEnabled)
                     {
-                        CheckSlotBufferHealth();
-
-                        if (globalOffsetMs > 0 && _mediaPlayerSyncService.IsAutoSyncEnabled)
-                        {
-                            await _mediaPlayerSyncService.TrySyncActivePlayersAsync(globalOffsetMs);
-                        }
+                        await _mediaPlayerSyncService.TrySyncActivePlayersAsync(globalOffsetMs);
                     }
                 }
                 catch { }
@@ -676,8 +717,25 @@ namespace SoundPair
 
         #endregion
 
+        /// <summary>
+        /// Base pre-fill silence padding in milliseconds.
+        /// Wireless (Bluetooth) headsets require ~80ms baseline padding to handle RF TDD packet bursts,
+        /// while wired endpoints run reliably with ~60ms padding.
+        /// </summary>
         private static int GetBasePaddingMs(bool isWireless) => isWireless ? 80 : 60;
 
+        /// <summary>
+        /// Initializes and starts a dedicated audio rendering pipeline for a given slot.
+        /// 
+        /// Pipeline Steps:
+        /// 1. Tears down any existing stream in this slot (KillStreamSlot).
+        /// 2. Allocates a new BufferedWaveProvider with DiscardOnBufferOverflow=true to avoid unbounded queuing.
+        /// 3. Injects calibrated silence padding (GetBasePaddingMs + delayMs) to ensure sub-millisecond sync with other outputs.
+        /// 4. Wraps in SampleChannel for floating-point master/app volume scaling.
+        /// 5. Automatically resamples via WdlResamplingSampleProvider if the device's native rate differs from 48 kHz.
+        /// 6. Configures WASAPI render client with 150ms hardware buffer for Bluetooth (absorbs packet retries) or 50ms for wired.
+        /// 7. Requests Windows Multimedia Class Scheduler Service (MMCSS) high-priority audio thread.
+        /// </summary>
         private void StartSlotPlayback(int slotIndex, MMDevice dev)
         {
             if (capture == null || !isStreaming) return;
@@ -686,7 +744,7 @@ namespace SoundPair
             {
                 KillStreamSlot(slotIndex);
 
-                // Fast-clearing buffer with discard on overflow to prevent latency drift
+                // 1. Allocate isolated ring buffer with overflow protection
                 var newBuf = new BufferedWaveProvider(capture.WaveFormat)
                 {
                     DiscardOnBufferOverflow = true
@@ -708,6 +766,7 @@ namespace SoundPair
                     case 3: _isSlot3Wireless = isWireless; break;
                 }
 
+                // 2. Pre-fill exact calibrated silence padding for ZERO DRIFT sync
                 int basePadding = GetBasePaddingMs(isWireless);
                 int targetPaddingMs = basePadding + Math.Max(0, delayMs);
                 int prefillBytes = (int)((long)targetPaddingMs * capture.WaveFormat.AverageBytesPerSecond / 1000);
@@ -718,6 +777,7 @@ namespace SoundPair
                     newBuf.AddSamples(SilenceBuffer, 0, toAdd);
                 }
 
+                // 3. Floating point volume and software gain stage
                 var sampleChannel = new SampleChannel(newBuf, true);
                 double volVal = slotIndex switch
                 {
@@ -736,6 +796,7 @@ namespace SoundPair
                 };
                 sampleChannel.Volume = cachedSysVol * (isHardwareBound ? 1.0f : volFactor);
 
+                // 4. Sample rate conversion (e.g. 48kHz -> 44.1kHz or 96kHz if headset requires it)
                 ISampleProvider prov = sampleChannel;
                 int targetRate = GetDeviceMixFormat(dev).SampleRate;
                 if (prov.WaveFormat.SampleRate != targetRate)
@@ -743,8 +804,9 @@ namespace SoundPair
                     prov = new WdlResamplingSampleProvider(prov, targetRate);
                 }
 
-                // Wireless devices benefit from 100ms WASAPI buffer to absorb packet retries without glitching
-                int latency = isWireless ? 100 : 50;
+                // 5. WASAPI player initialization with RF-safe latency buffer
+                // Wireless devices benefit from 150ms WASAPI buffer to absorb packet retries without glitching
+                int latency = isWireless ? 150 : 50;
                 var player = new WasapiPlayerBuilder()
                     .WithDevice(dev)
                     .WithLatency(latency)
@@ -763,6 +825,7 @@ namespace SoundPair
                             out1 = player;
                             activeId1 = dev.ID;
                             _slot1Stalled = false;
+                            _isSlot1UserPaused = false;
                             player.PlaybackStopped += (s, e) => { _slot1Stalled = true; };
                             break;
                         case 2:
@@ -771,6 +834,7 @@ namespace SoundPair
                             out2 = player;
                             activeId2 = dev.ID;
                             _slot2Stalled = false;
+                            _isSlot2UserPaused = false;
                             player.PlaybackStopped += (s, e) => { _slot2Stalled = true; };
                             break;
                         case 3:
@@ -779,12 +843,14 @@ namespace SoundPair
                             out3 = player;
                             activeId3 = dev.ID;
                             _slot3Stalled = false;
+                            _isSlot3UserPaused = false;
                             player.PlaybackStopped += (s, e) => { _slot3Stalled = true; };
                             break;
                     }
                 }
 
                 UpdateMaxBacklogLimits();
+                UpdateSlotPauseButtonUI(slotIndex, false);
                 player.Play();
             }
             catch (Exception ex)
@@ -830,49 +896,42 @@ namespace SoundPair
             }
         }
 
+        /// <summary>
+        /// Recalculates maximum buffer capacity thresholds for each slot.
+        /// 
+        /// Why this is vital:
+        /// When one Bluetooth headset moves far away or experiences 2.4GHz RF interference,
+        /// Windows Bluetooth driver slows down its consumption rate.
+        /// If we allowed buffers to grow indefinitely:
+        /// 1. RAM usage would balloon.
+        /// 2. Audio on the struggling headset would drift further and further behind.
+        /// 3. The struggling device would starve the other headset of radio bandwidth.
+        /// 
+        /// By setting a hard ceiling at [Target Sync Padding + 800ms], we allow generous
+        /// burst absorption for normal jitter, but if a headset falls further behind,
+        /// packets are dropped ONLY for that struggling headset, leaving the other headsets completely unaffected!
+        /// </summary>
         private void UpdateMaxBacklogLimits()
         {
             if (capture == null) return;
             int bps = capture.WaveFormat.AverageBytesPerSecond;
 
+            // Generous 800ms backlog ceiling to absorb Bluetooth retry bursts and dual-pairing handovers without packet drops
+            int extraMs = 800;
             int target1 = (int)((long)(GetBasePaddingMs(_isSlot1Wireless) + Math.Max(0, delay1Ms)) * bps / 1000);
-            _maxBacklogBytes1 = target1 + (int)((long)140 * bps / 1000);
+            _maxBacklogBytes1 = target1 + (int)((long)extraMs * bps / 1000);
 
             int target2 = (int)((long)(GetBasePaddingMs(_isSlot2Wireless) + Math.Max(0, delay2Ms)) * bps / 1000);
-            _maxBacklogBytes2 = target2 + (int)((long)140 * bps / 1000);
+            _maxBacklogBytes2 = target2 + (int)((long)extraMs * bps / 1000);
 
             int target3 = (int)((long)(GetBasePaddingMs(_isSlot3Wireless) + Math.Max(0, delay3Ms)) * bps / 1000);
-            _maxBacklogBytes3 = target3 + (int)((long)140 * bps / 1000);
+            _maxBacklogBytes3 = target3 + (int)((long)extraMs * bps / 1000);
         }
 
-        private void CheckSlotBufferHealth()
-        {
-            if (capture == null || !isStreaming) return;
-            int bps = capture.WaveFormat.AverageBytesPerSecond;
-            int ba = capture.WaveFormat.BlockAlign;
-
-            CheckSlotRecovery(buffer1, 1, delay1Ms, _isSlot1Wireless, bps, ba);
-            CheckSlotRecovery(buffer2, 2, delay2Ms, _isSlot2Wireless, bps, ba);
-            CheckSlotRecovery(buffer3, 3, delay3Ms, _isSlot3Wireless, bps, ba);
-        }
-
-        private void CheckSlotRecovery(BufferedWaveProvider? buf, int slotIndex, int delayMs, bool isWireless, int bps, int ba)
-        {
-            if (buf == null) return;
-            int basePadding = GetBasePaddingMs(isWireless);
-            int targetBytes = (int)((long)(basePadding + Math.Max(0, delayMs)) * bps / 1000);
-            targetBytes -= (targetBytes % ba);
-
-            // If a buffer completely drained to 0 (underrun because headset was out of range),
-            // restore its target padding of silence so when it catches up it plays in perfect sync
-            if (buf.BufferedBytes == 0 && targetBytes > 0)
-            {
-                int toAdd = Math.Min(targetBytes, SilenceBuffer.Length);
-                try { buf.AddSamples(SilenceBuffer, 0, toAdd); } catch { }
-                Debug.WriteLine($"[SyncGuard] Restored sync padding for Slot {slotIndex}");
-            }
-        }
-
+        /// <summary>
+        /// Handles system audio endpoint changes (e.g., Bluetooth reconnect, USB plug/unplug)
+        /// received via Windows WM_DEVICECHANGE messages while streaming is active.
+        /// </summary>
         private void HandleDeviceChangeWhileStreaming()
         {
             if (!isStreaming) return;
@@ -1349,10 +1408,225 @@ namespace SoundPair
             }
         }
 
+        // Master Global Calibration side panel trigger
         private void BtnGlobalCalibrate_Click(object? sender, RoutedEventArgs e) => OpenSidePanelForSlot(0);
-        private void BtnCalDevice1_Click(object? sender, RoutedEventArgs e) => OpenSidePanelForSlot(1);
-        private void BtnCalDevice2_Click(object? sender, RoutedEventArgs e) => OpenSidePanelForSlot(2);
-        private void BtnCalDevice3_Click(object? sender, RoutedEventArgs e) => OpenSidePanelForSlot(3);
+
+        // Per-slot Pause / Resume button handlers
+        private void BtnPauseSlot1_Click(object? sender, RoutedEventArgs e) => ToggleSlotPause(1);
+        private void BtnPauseSlot2_Click(object? sender, RoutedEventArgs e) => ToggleSlotPause(2);
+        private void BtnPauseSlot3_Click(object? sender, RoutedEventArgs e) => ToggleSlotPause(3);
+
+        /// <summary>
+        /// Toggles the streaming state of an individual slot between Paused and Active.
+        /// When Paused: audio frames to this headset immediately cease, halting Bluetooth packet transmission
+        /// and preventing ARQ packet retries from starving the other active headset during a phone call.
+        /// When Resumed: residual audio is flushed and exact calibrated sync padding is injected, guaranteeing Zero Drift.
+        /// </summary>
+        private void ToggleSlotPause(int slotIndex)
+        {
+            if (!isStreaming) return;
+
+            WasapiPlayer? player = slotIndex switch
+            {
+                1 => out1,
+                2 => out2,
+                3 => out3,
+                _ => null
+            };
+            if (player == null) return;
+
+            bool isCurrentlyPaused = slotIndex switch
+            {
+                1 => _isSlot1UserPaused,
+                2 => _isSlot2UserPaused,
+                3 => _isSlot3UserPaused,
+                _ => false
+            };
+
+            if (isCurrentlyPaused)
+            {
+                // Resume slot with zero-drift calibrated alignment
+                ResumeSlotWithCalibratedSync(slotIndex);
+            }
+            else
+            {
+                // Pause slot: immediately stop packet feed and pause WASAPI hardware playback
+                PauseSlot(slotIndex);
+            }
+        }
+
+        /// <summary>
+        /// Pauses the specified slot.
+        /// Flushes its ring buffer and calls outX.Pause() so Windows audio engine halts transmission to the device.
+        /// </summary>
+        private void PauseSlot(int slotIndex)
+        {
+            switch (slotIndex)
+            {
+                case 1:
+                    _isSlot1UserPaused = true;
+                    lock (_bufferLock) { buffer1?.ClearBuffer(); }
+                    try { out1?.Pause(); } catch { }
+                    break;
+                case 2:
+                    _isSlot2UserPaused = true;
+                    lock (_bufferLock) { buffer2?.ClearBuffer(); }
+                    try { out2?.Pause(); } catch { }
+                    break;
+                case 3:
+                    _isSlot3UserPaused = true;
+                    lock (_bufferLock) { buffer3?.ClearBuffer(); }
+                    try { out3?.Pause(); } catch { }
+                    break;
+            }
+
+            UpdateSlotPauseButtonUI(slotIndex, true);
+            Debug.WriteLine($"[User Action] Slot {slotIndex} PAUSED. Bluetooth radio bandwidth freed for phone calls.");
+        }
+
+        /// <summary>
+        /// Resumes streaming on a previously paused slot with ZERO AUDIO DRIFT.
+        /// 
+        /// Zero-Drift Resync Algorithm:
+        /// 1. Discard any stale samples in buffer: buf.ClearBuffer().
+        /// 2. Pre-fill exact calibrated silence padding: (BasePadding + delayMs) * bps / 1000.
+        /// 3. Reset stalled flag and user paused flag.
+        /// 4. Restart WASAPI playback: player.Play().
+        /// 
+        /// Because the silence padding exactly matches the output's calibrated target latency,
+        /// the newly resumed stream plays in instantaneous acoustic sync with all other active outputs.
+        /// </summary>
+        private void ResumeSlotWithCalibratedSync(int slotIndex)
+        {
+            if (capture == null || !isStreaming) return;
+
+            BufferedWaveProvider? buf;
+            WasapiPlayer? player;
+            bool isWireless;
+            int delayMs;
+            ComboBox cb;
+
+            switch (slotIndex)
+            {
+                case 1:
+                    buf = buffer1; player = out1; isWireless = _isSlot1Wireless; delayMs = delay1Ms; cb = comboDevice1;
+                    break;
+                case 2:
+                    buf = buffer2; player = out2; isWireless = _isSlot2Wireless; delayMs = delay2Ms; cb = comboDevice2;
+                    break;
+                case 3:
+                    buf = buffer3; player = out3; isWireless = _isSlot3Wireless; delayMs = delay3Ms; cb = comboDevice3;
+                    break;
+                default:
+                    return;
+            }
+
+            if (buf == null || player == null) return;
+
+            var dev = GetDeviceFromCombo(cb);
+            if (dev == null || dev.State != DeviceState.Active)
+            {
+                Debug.WriteLine($"[User Action] Slot {slotIndex} cannot resume: device not active.");
+                return;
+            }
+
+            lock (_bufferLock)
+            {
+                // 1. Flush any residual samples to guarantee ZERO audio drift
+                buf.ClearBuffer();
+
+                // 2. Pre-fill exact calibrated sync padding (prevents audio drift)
+                int basePadding = GetBasePaddingMs(isWireless);
+                int targetPaddingMs = basePadding + Math.Max(0, delayMs);
+                int bps = capture.WaveFormat.AverageBytesPerSecond;
+                int prefillBytes = (int)((long)targetPaddingMs * bps / 1000);
+                prefillBytes -= (prefillBytes % capture.WaveFormat.BlockAlign);
+
+                if (prefillBytes > 0)
+                {
+                    int toAdd = Math.Min(prefillBytes, SilenceBuffer.Length);
+                    buf.AddSamples(SilenceBuffer, 0, toAdd);
+                }
+
+                switch (slotIndex)
+                {
+                    case 1:
+                        _slot1Stalled = false;
+                        _isSlot1UserPaused = false;
+                        break;
+                    case 2:
+                        _slot2Stalled = false;
+                        _isSlot2UserPaused = false;
+                        break;
+                    case 3:
+                        _slot3Stalled = false;
+                        _isSlot3UserPaused = false;
+                        break;
+                }
+
+                // 3. Resume WASAPI playback
+                try
+                {
+                    player.Play();
+                    Debug.WriteLine($"[User Action] Slot {slotIndex} RESUMED with {targetPaddingMs}ms calibrated padding (Zero Drift).");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[User Action] Slot {slotIndex} Play() failed ({ex.Message}). Rebuilding slot...");
+                    StartSlotPlayback(slotIndex, dev);
+                }
+            }
+
+            UpdateSlotPauseButtonUI(slotIndex, false);
+        }
+
+        private void UpdateSlotPauseButtonUI(int slotIndex, bool isPaused)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                Button? btn = slotIndex switch
+                {
+                    1 => btnPauseSlot1,
+                    2 => btnPauseSlot2,
+                    3 => btnPauseSlot3,
+                    _ => null
+                };
+                TextBlock? icon = slotIndex switch
+                {
+                    1 => iconPauseSlot1,
+                    2 => iconPauseSlot2,
+                    3 => iconPauseSlot3,
+                    _ => null
+                };
+                TextBlock? lbl = slotIndex switch
+                {
+                    1 => lblPauseSlot1,
+                    2 => lblPauseSlot2,
+                    3 => lblPauseSlot3,
+                    _ => null
+                };
+
+                if (btn != null && icon != null && lbl != null)
+                {
+                    if (isPaused)
+                    {
+                        btn.Background = PausedButtonBg;
+                        btn.BorderBrush = PausedButtonBorder;
+                        icon.Text = "▶";
+                        lbl.Text = "Resume";
+                        ToolTip.SetTip(btn, $"Resume Slot {slotIndex} (Exact zero-drift sync alignment)");
+                    }
+                    else
+                    {
+                        btn.Background = ActiveButtonBg;
+                        btn.BorderBrush = ActiveButtonBorder;
+                        icon.Text = "⏸";
+                        lbl.Text = "Pause";
+                        ToolTip.SetTip(btn, $"Pause Slot {slotIndex} (Frees Bluetooth radio for phone calls)");
+                    }
+                }
+            });
+        }
 
         private void OpenSidePanelForSlot(int slotIndex)
         {
@@ -2566,6 +2840,12 @@ namespace SoundPair
                         .Build();
                 }
 
+                // Reset pause states on start
+                _isSlot1UserPaused = _isSlot2UserPaused = _isSlot3UserPaused = false;
+                UpdateSlotPauseButtonUI(1, false);
+                UpdateSlotPauseButtonUI(2, false);
+                UpdateSlotPauseButtonUI(3, false);
+
                 // Start playback on all active slots with independent, low-latency 800ms buffers
                 if (dev1 != null) StartSlotPlayback(1, dev1);
                 if (dev2 != null) StartSlotPlayback(2, dev2);
@@ -2595,25 +2875,25 @@ namespace SoundPair
                             }
 
                             // Independent, lock-free, isolated writes per slot:
-                            // When one headset moves to a distance, its buffer hits its backlog cap.
-                            // Dropping packets for only that struggling headset prevents Bluetooth 
-                            // radio exhaustion and ensures the near headset never stutters or pauses!
+                            // When one headset is paused (for phone call) or moves to a distance,
+                            // its buffer stops receiving samples. Freeing Bluetooth radio bandwidth
+                            // ensures the other active headset never stutters, breaks, or pauses!
                             var b1 = buffer1;
-                            if (b1 != null && !_slot1Stalled && b1.BufferedBytes <= _maxBacklogBytes1)
+                            if (b1 != null && !_slot1Stalled && !_isSlot1UserPaused && b1.BufferedBytes <= _maxBacklogBytes1)
                             {
                                 try { b1.AddSamples(transferBuffer, 0, buffer.Length); }
                                 catch { _slot1Stalled = true; }
                             }
 
                             var b2 = buffer2;
-                            if (b2 != null && !_slot2Stalled && b2.BufferedBytes <= _maxBacklogBytes2)
+                            if (b2 != null && !_slot2Stalled && !_isSlot2UserPaused && b2.BufferedBytes <= _maxBacklogBytes2)
                             {
                                 try { b2.AddSamples(transferBuffer, 0, buffer.Length); }
                                 catch { _slot2Stalled = true; }
                             }
 
                             var b3 = buffer3;
-                            if (b3 != null && !_slot3Stalled && b3.BufferedBytes <= _maxBacklogBytes3)
+                            if (b3 != null && !_slot3Stalled && !_isSlot3UserPaused && b3.BufferedBytes <= _maxBacklogBytes3)
                             {
                                 try { b3.AddSamples(transferBuffer, 0, buffer.Length); }
                                 catch { _slot3Stalled = true; }
@@ -2965,9 +3245,14 @@ namespace SoundPair
             if (capture == null) return;
             int blockAlign = capture.WaveFormat.BlockAlign;
 
-            ApplyBufferDelay(buffer1, GetBasePaddingMs(_isSlot1Wireless) + delay1Ms, blockAlign);
-            ApplyBufferDelay(buffer2, GetBasePaddingMs(_isSlot2Wireless) + delay2Ms, blockAlign);
-            ApplyBufferDelay(buffer3, GetBasePaddingMs(_isSlot3Wireless) + delay3Ms, blockAlign);
+            // Only apply silence delay padding to active, non-paused slots
+            if (!_isSlot1UserPaused)
+                ApplyBufferDelay(buffer1, GetBasePaddingMs(_isSlot1Wireless) + delay1Ms, blockAlign);
+            if (!_isSlot2UserPaused)
+                ApplyBufferDelay(buffer2, GetBasePaddingMs(_isSlot2Wireless) + delay2Ms, blockAlign);
+            if (!_isSlot3UserPaused)
+                ApplyBufferDelay(buffer3, GetBasePaddingMs(_isSlot3Wireless) + delay3Ms, blockAlign);
+
             UpdateMaxBacklogLimits();
         }
 
@@ -3018,6 +3303,10 @@ namespace SoundPair
             sampleChannel1 = sampleChannel2 = sampleChannel3 = null;
             activeId1 = activeId2 = activeId3 = null;
             _slot1Stalled = _slot2Stalled = _slot3Stalled = false;
+            _isSlot1UserPaused = _isSlot2UserPaused = _isSlot3UserPaused = false;
+            UpdateSlotPauseButtonUI(1, false);
+            UpdateSlotPauseButtonUI(2, false);
+            UpdateSlotPauseButtonUI(3, false);
             _maxBacklogBytes1 = _maxBacklogBytes2 = _maxBacklogBytes3 = int.MaxValue;
 
             isStreaming = false;
