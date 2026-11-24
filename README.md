@@ -1,6 +1,8 @@
-# SoundPair
-
 <div align="center">
+
+<img src="icon.png" width="96" height="96" alt="SoundPair Logo" />
+
+# SoundPair
 
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D7?style=for-the-badge&logo=windows)](https://github.com/tousifkhan-web/SoundPair/releases)
 [![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg?style=for-the-badge)](LICENSE.md)
@@ -62,7 +64,7 @@ When streaming starts, SoundPair automatically silences your internal PC speaker
 
 ### Step 4: Dual-Pairing (Multipoint) Call Pause & Zero-Drift Resume
 
-- **Dedicated Per-Slot Pause Buttons (`⏸ Pause / ▶ Resume`):** Next to each device dropdown, a dedicated hardware pause button allows you to instantly halt streaming to that specific headset without affecting the other connected outputs.
+- **Dedicated Per-Slot Pause Buttons (`⏸` / `▶`):** Next to each device dropdown, a dedicated hardware pause button allows you to instantly halt streaming to that specific headset without affecting the other connected outputs.
 - **Bluetooth Radio Airtime Protection:** When a dual-pairing headset switches to your phone for an incoming call, clicking **Pause** halts WASAPI frame generation and clears its buffer. This immediately stops Windows from sending unacknowledged Bluetooth packets, preventing radio contention and ensuring the other active headset continues playing smoothly with **zero sound breaks, stuttering, or pauses**.
 - **Zero-Drift Resume Guarantee:** When your phone call ends, clicking **▶ Resume** flushes any stale audio and pre-fills the exact calibrated silence padding, resuming playback in instantaneous, perfect sync with your other outputs and video.
 
@@ -85,7 +87,7 @@ Click the **Start Streaming** button. SoundPair executes a fast Bluetooth radio 
 ## ✨ Key Features
 
 - **Tri-Device & Tri-Wireless Simultaneous Streaming:** Route Windows audio to up to 3 separate playback outputs simultaneously—supporting up to 3 wireless Bluetooth headsets or speakers with independent lock-free buffer underrun protection.
-- **Dual-Pairing (Multipoint) Call Pause & Resume:** Dedicated `⏸ Pause / ▶ Resume` buttons per slot that instantly stop transmission to a headset during a phone call, freeing 100% of the PC's Bluetooth radio airtime to prevent breaking or stuttering on other headsets.
+- **Dual-Pairing (Multipoint) Call Pause & Resume:** Dedicated `⏸` / `▶` icon buttons per slot that instantly stop transmission to a headset during a phone call, freeing 100% of the PC's Bluetooth radio airtime to prevent breaking or stuttering on other headsets.
 - **Zero-Drift Synchronization Guarantee:** Automatic buffer clearing and precision silence padding injection ensures resumed streams align instantaneously with active playback without any accumulated latency drift.
 - **Dynamic Mixed-Format Audio Engine (Zero Quality Loss):** Internal 32-bit IEEE Floating-Point master pipeline with studio-grade **Cockos WDL Resampling** (< -120 dB THD+N). Simultaneously drives mixed formats (e.g., 16-bit 44.1 kHz, 24-bit 96 kHz, and 32-bit audio) with full dynamic range and zero phase distortion.
 - **Isolated Backlog Buffering (RF Jitter Protection):** Dynamic 800 ms backlog ceiling per slot isolates struggling or distant wireless headsets, ensuring Bluetooth packet drops on one device never cause audio stutter on others.
@@ -116,28 +118,20 @@ Click the **Start Streaming** button. SoundPair executes a fast Bluetooth radio 
 
 ## 📦 How to Build and Publish
 
-SoundPair includes a convenient build script (`Build.bat`) in the project root that creates both lightweight and standalone single-file executables:
+SoundPair includes a convenient build script (`build.bat`) in the project root that creates a standalone, self-contained single-file executable:
 
 ```cmd
-Build.bat
+build.bat
 ```
 
 Or you can build via the .NET CLI:
 
-### 1. Lightweight Build (Framework-Dependent)
+### Standalone Build (Self-Contained Single-File)
 
-Produces a compact single-file executable. Requires the target machine to have the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) installed:
-
-```bash
-dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:AssemblyName=Soundpair_lightweight -o ./publish/light
-```
-
-### 2. Standalone Build (Self-Contained)
-
-Bundles the complete .NET 10 runtime, native dependencies, and compression into a single self-extracting executable. Does not require any pre-installed .NET runtimes:
+Bundles the complete .NET 10 runtime, native dependencies, and compression into a single self-extracting executable (`publish/SoundPair.exe`). Does not require any pre-installed .NET runtimes on target machines:
 
 ```bash
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:AssemblyName=SoundPair_standalone -o ./publish/standalone -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
+dotnet publish SoundPair.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:AssemblyName=SoundPair -o ./publish -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
 ```
 
 ---

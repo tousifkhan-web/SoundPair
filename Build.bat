@@ -1,33 +1,22 @@
 @echo off
 echo ===================================================
-echo   Building SoundPair (Standalone and Lightweight)
+echo   Building SoundPair (Standalone Single-File)
 echo ===================================================
 
 echo.
-echo [1/2] Building SoundPair_standalone (With .NET 10 Runtime)...
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:AssemblyName=SoundPair -o ./publish/standalone -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
+echo Building SoundPair Standalone (Includes .NET 10 Runtime)...
+dotnet publish SoundPair.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:AssemblyName=SoundPair -o ./publish -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
 
 if %errorlevel% neq 0 (
     echo.
-    echo [ERROR] Failed to build SoundPair_standalone!
-    goto error
-)
-
-echo.
-echo [2/2] Building Soundpair_lightweight (Without Runtime)...
-dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:AssemblyName=Soundpair_lightweight -o ./publish/light -p:IncludeNativeLibrariesForSelfExtract=true
-
-if %errorlevel% neq 0 (
-    echo.
-    echo [ERROR] Failed to build Soundpair_lightweight!
+    echo [ERROR] Failed to build SoundPair Standalone!
     goto error
 )
 
 echo.
 echo ===================================================
 echo   Build Completed Successfully!
-echo   - Standalone: publish\standalone\
-echo   - Lightweight: publish\light\
+echo   - Output Executable: publish\SoundPair.exe
 echo ===================================================
 goto end
 

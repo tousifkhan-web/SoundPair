@@ -1,0 +1,75 @@
+name: Build & Auto Release
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+      - '.gitignore'
+      - 'LICENSE.md'
+  workflow_dispatch: # Allows manual trigger directly from GitHub web UI if ever needed
+
+permissions:
+  contents: write # Needed to create tags, releases, and upload assets
+
+jobs:
+  auto-version-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required for git history to determine version bumps
+
+      - name: Automatically Calculate & Bump Version
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch
+          initial_version: 2.0.0
+          release_branches: main
+          tag_prefix: v
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore NuGet Packages
+        run: dotnet restore -r win-x64
+
+      - name: Publish Standalone Executable with Automatic Version Stamping
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.tag_version.outputs.new_version }}"
+          $tag = "${{ steps.tag_version.outputs.new_tag }}"
+          Write-Host "Publishing SoundPair version: $tag ($ver)"
+
+          dotnet publish SoundPair.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:AssemblyName=SoundPair `
+            -p:Version=$ver `
+            -p:FileVersion=$ver `
+            -p:InformationalVersion=$tag `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -o ./publish
+
+      - name: Create GitHub Release & Upload Executable
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag_version.outputs.new_tag }}
+          name: SoundPair ${{ steps.tag_version.outputs.new_tag }}
+          body: ${{ steps.tag_version.outputs.changelog }}
+          draft: false
+          prerelease: false
+          files: |
+            ./publish/SoundPair.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

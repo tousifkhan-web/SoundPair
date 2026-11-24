@@ -719,10 +719,12 @@ namespace SoundPair
 
         /// <summary>
         /// Base pre-fill silence padding in milliseconds.
-        /// Wireless (Bluetooth) headsets require ~80ms baseline padding to handle RF TDD packet bursts,
-        /// while wired endpoints run reliably with ~60ms padding.
+        /// <summary>
+        /// Wireless (Bluetooth) headsets require ~200ms baseline padding (matching the 150ms WASAPI hardware
+        /// buffer + 50ms jitter cushion) to absorb RF TDD packet bursts and prevent starvation glitches,
+        /// while wired endpoints run reliably with ~70ms padding.
         /// </summary>
-        private static int GetBasePaddingMs(bool isWireless) => isWireless ? 80 : 60;
+        private static int GetBasePaddingMs(bool isWireless) => isWireless ? 200 : 70;
 
         /// <summary>
         /// Initializes and starts a dedicated audio rendering pipeline for a given slot.
@@ -916,8 +918,8 @@ namespace SoundPair
             if (capture == null) return;
             int bps = capture.WaveFormat.AverageBytesPerSecond;
 
-            // Generous 800ms backlog ceiling to absorb Bluetooth retry bursts and dual-pairing handovers without packet drops
-            int extraMs = 800;
+            // Generous 1500ms backlog ceiling to absorb Bluetooth retry bursts and dual-pairing handovers without packet drops
+            int extraMs = 1500;
             int target1 = (int)((long)(GetBasePaddingMs(_isSlot1Wireless) + Math.Max(0, delay1Ms)) * bps / 1000);
             _maxBacklogBytes1 = target1 + (int)((long)extraMs * bps / 1000);
 
@@ -948,11 +950,11 @@ namespace SoundPair
                     activeMap[d.ID] = d;
                 }
 
-                // Check Slot 1
+                // Check Slot 1 (Never auto-reconnect if user explicitly paused it)
                 var dev1 = GetDeviceFromCombo(comboDevice1);
                 if (dev1 != null)
                 {
-                    if (out1 == null || _slot1Stalled)
+                    if (!_isSlot1UserPaused && (out1 == null || _slot1Stalled))
                     {
                         if (activeMap.TryGetValue(dev1.ID, out var aliveDev))
                         {
@@ -967,11 +969,11 @@ namespace SoundPair
                     }
                 }
 
-                // Check Slot 2
+                // Check Slot 2 (Never auto-reconnect if user explicitly paused it)
                 var dev2 = GetDeviceFromCombo(comboDevice2);
                 if (dev2 != null)
                 {
-                    if (out2 == null || _slot2Stalled)
+                    if (!_isSlot2UserPaused && (out2 == null || _slot2Stalled))
                     {
                         if (activeMap.TryGetValue(dev2.ID, out var aliveDev))
                         {
@@ -986,11 +988,11 @@ namespace SoundPair
                     }
                 }
 
-                // Check Slot 3
+                // Check Slot 3 (Never auto-reconnect if user explicitly paused it)
                 var dev3 = GetDeviceFromCombo(comboDevice3);
                 if (dev3 != null)
                 {
-                    if (out3 == null || _slot3Stalled)
+                    if (!_isSlot3UserPaused && (out3 == null || _slot3Stalled))
                     {
                         if (activeMap.TryGetValue(dev3.ID, out var aliveDev))
                         {
@@ -1426,15 +1428,6 @@ namespace SoundPair
         {
             if (!isStreaming) return;
 
-            WasapiPlayer? player = slotIndex switch
-            {
-                1 => out1,
-                2 => out2,
-                3 => out3,
-                _ => null
-            };
-            if (player == null) return;
-
             bool isCurrentlyPaused = slotIndex switch
             {
                 1 => _isSlot1UserPaused,
@@ -1450,14 +1443,15 @@ namespace SoundPair
             }
             else
             {
-                // Pause slot: immediately stop packet feed and pause WASAPI hardware playback
+                // Pause slot: immediately terminate hardware playback and release Bluetooth radio
                 PauseSlot(slotIndex);
             }
         }
 
         /// <summary>
-        /// Pauses the specified slot.
-        /// Flushes its ring buffer and calls outX.Pause() so Windows audio engine halts transmission to the device.
+        /// Pauses the specified slot by completely shutting down its WASAPI render client.
+        /// Stopping and disposing the audio client tells Windows to immediately close the A2DP stream,
+        /// completely freeing 100% of the PC's single Bluetooth radio transceiver for the remaining active headset!
         /// </summary>
         private void PauseSlot(int slotIndex)
         {
@@ -1465,119 +1459,120 @@ namespace SoundPair
             {
                 case 1:
                     _isSlot1UserPaused = true;
-                    lock (_bufferLock) { buffer1?.ClearBuffer(); }
-                    try { out1?.Pause(); } catch { }
+                    KillStreamSlot(1);
                     break;
                 case 2:
                     _isSlot2UserPaused = true;
-                    lock (_bufferLock) { buffer2?.ClearBuffer(); }
-                    try { out2?.Pause(); } catch { }
+                    KillStreamSlot(2);
                     break;
                 case 3:
                     _isSlot3UserPaused = true;
-                    lock (_bufferLock) { buffer3?.ClearBuffer(); }
-                    try { out3?.Pause(); } catch { }
+                    KillStreamSlot(3);
                     break;
             }
 
             UpdateSlotPauseButtonUI(slotIndex, true);
-            Debug.WriteLine($"[User Action] Slot {slotIndex} PAUSED. Bluetooth radio bandwidth freed for phone calls.");
+            Debug.WriteLine($"[User Action] Slot {slotIndex} PAUSED. Hardware stream closed & 100% Bluetooth radio airtime freed.");
         }
 
         /// <summary>
         /// Resumes streaming on a previously paused slot with ZERO AUDIO DRIFT.
-        /// 
-        /// Zero-Drift Resync Algorithm:
-        /// 1. Discard any stale samples in buffer: buf.ClearBuffer().
-        /// 2. Pre-fill exact calibrated silence padding: (BasePadding + delayMs) * bps / 1000.
-        /// 3. Reset stalled flag and user paused flag.
-        /// 4. Restart WASAPI playback: player.Play().
-        /// 
-        /// Because the silence padding exactly matches the output's calibrated target latency,
-        /// the newly resumed stream plays in instantaneous acoustic sync with all other active outputs.
+        /// Resolves the live Windows CoreAudio endpoint (essential for Bluetooth headsets rejoining after a phone call),
+        /// re-initializes a fresh WASAPI client, pre-fills exact calibrated silence padding,
+        /// and guarantees instant acoustic sync without ever needing to restart the master stream.
         /// </summary>
         private void ResumeSlotWithCalibratedSync(int slotIndex)
         {
             if (capture == null || !isStreaming) return;
 
-            BufferedWaveProvider? buf;
-            WasapiPlayer? player;
-            bool isWireless;
-            int delayMs;
-            ComboBox cb;
+            ComboBox cb = slotIndex switch
+            {
+                1 => comboDevice1,
+                2 => comboDevice2,
+                3 => comboDevice3,
+                _ => null!
+            };
+            if (cb == null) return;
+
+            var dev = GetDeviceFromCombo(cb);
+            if (dev == null)
+            {
+                Debug.WriteLine($"[User Action] Slot {slotIndex} cannot resume: device not configured.");
+                return;
+            }
+
+            // Fresh resolution from Windows Audio Endpoint Enumerator:
+            // When Bluetooth headsets rejoin after a phone call, stale cached COM pointers
+            // can report inactive. Resolving live from MMDeviceEnumerator guarantees we get
+            // the active, live device without needing to stop and restart the entire stream!
+            MMDevice? liveDev = null;
+            try
+            {
+                using var enumerator = new MMDeviceEnumerator();
+                var candidate = enumerator.GetDevice(dev.ID);
+                if (candidate != null && candidate.State == DeviceState.Active)
+                {
+                    liveDev = candidate;
+                }
+            }
+            catch { }
+
+            if (liveDev == null)
+            {
+                // Fallback: check all active endpoints by ID and FriendlyName in case Windows recreated the endpoint instance
+                try
+                {
+                    using var enumerator = new MMDeviceEnumerator();
+                    using var activeEndpoints = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
+                    for (int i = 0; i < activeEndpoints.Count; i++)
+                    {
+                        var ep = activeEndpoints[i];
+                        if (string.Equals(ep.ID, dev.ID, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(ep.FriendlyName, dev.FriendlyName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            liveDev = ep;
+                            break;
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            if (liveDev == null || liveDev.State != DeviceState.Active)
+            {
+                Debug.WriteLine($"[User Action] Slot {slotIndex} cannot resume: {dev.FriendlyName} not active in Windows yet.");
+                if (lblStatus != null)
+                {
+                    lblStatus.Text = $"Status: {dev.FriendlyName} is still reconnecting to Windows. Click Play once connected.";
+                    lblStatus.Foreground = Brushes.Orange;
+                }
+                return;
+            }
 
             switch (slotIndex)
             {
                 case 1:
-                    buf = buffer1; player = out1; isWireless = _isSlot1Wireless; delayMs = delay1Ms; cb = comboDevice1;
+                    _isSlot1UserPaused = false;
+                    BindDevice1(liveDev);
                     break;
                 case 2:
-                    buf = buffer2; player = out2; isWireless = _isSlot2Wireless; delayMs = delay2Ms; cb = comboDevice2;
+                    _isSlot2UserPaused = false;
+                    BindDevice2(liveDev);
                     break;
                 case 3:
-                    buf = buffer3; player = out3; isWireless = _isSlot3Wireless; delayMs = delay3Ms; cb = comboDevice3;
+                    _isSlot3UserPaused = false;
+                    BindDevice3(liveDev);
                     break;
-                default:
-                    return;
             }
 
-            if (buf == null || player == null) return;
-
-            var dev = GetDeviceFromCombo(cb);
-            if (dev == null || dev.State != DeviceState.Active)
+            // Fresh start ensures no corrupted WASAPI state or buffer underrun residue
+            StartSlotPlayback(slotIndex, liveDev);
+            Debug.WriteLine($"[User Action] Slot {slotIndex} RESUMED on reconnected device: {liveDev.FriendlyName} (Zero Drift).");
+            if (lblStatus != null)
             {
-                Debug.WriteLine($"[User Action] Slot {slotIndex} cannot resume: device not active.");
-                return;
+                lblStatus.Text = "Status: Streaming live audio";
+                lblStatus.Foreground = Brushes.LightGreen;
             }
-
-            lock (_bufferLock)
-            {
-                // 1. Flush any residual samples to guarantee ZERO audio drift
-                buf.ClearBuffer();
-
-                // 2. Pre-fill exact calibrated sync padding (prevents audio drift)
-                int basePadding = GetBasePaddingMs(isWireless);
-                int targetPaddingMs = basePadding + Math.Max(0, delayMs);
-                int bps = capture.WaveFormat.AverageBytesPerSecond;
-                int prefillBytes = (int)((long)targetPaddingMs * bps / 1000);
-                prefillBytes -= (prefillBytes % capture.WaveFormat.BlockAlign);
-
-                if (prefillBytes > 0)
-                {
-                    int toAdd = Math.Min(prefillBytes, SilenceBuffer.Length);
-                    buf.AddSamples(SilenceBuffer, 0, toAdd);
-                }
-
-                switch (slotIndex)
-                {
-                    case 1:
-                        _slot1Stalled = false;
-                        _isSlot1UserPaused = false;
-                        break;
-                    case 2:
-                        _slot2Stalled = false;
-                        _isSlot2UserPaused = false;
-                        break;
-                    case 3:
-                        _slot3Stalled = false;
-                        _isSlot3UserPaused = false;
-                        break;
-                }
-
-                // 3. Resume WASAPI playback
-                try
-                {
-                    player.Play();
-                    Debug.WriteLine($"[User Action] Slot {slotIndex} RESUMED with {targetPaddingMs}ms calibrated padding (Zero Drift).");
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"[User Action] Slot {slotIndex} Play() failed ({ex.Message}). Rebuilding slot...");
-                    StartSlotPlayback(slotIndex, dev);
-                }
-            }
-
-            UpdateSlotPauseButtonUI(slotIndex, false);
         }
 
         private void UpdateSlotPauseButtonUI(int slotIndex, bool isPaused)
@@ -1598,22 +1593,14 @@ namespace SoundPair
                     3 => iconPauseSlot3,
                     _ => null
                 };
-                TextBlock? lbl = slotIndex switch
-                {
-                    1 => lblPauseSlot1,
-                    2 => lblPauseSlot2,
-                    3 => lblPauseSlot3,
-                    _ => null
-                };
 
-                if (btn != null && icon != null && lbl != null)
+                if (btn != null && icon != null)
                 {
                     if (isPaused)
                     {
                         btn.Background = PausedButtonBg;
                         btn.BorderBrush = PausedButtonBorder;
                         icon.Text = "▶";
-                        lbl.Text = "Resume";
                         ToolTip.SetTip(btn, $"Resume Slot {slotIndex} (Exact zero-drift sync alignment)");
                     }
                     else
@@ -1621,7 +1608,6 @@ namespace SoundPair
                         btn.Background = ActiveButtonBg;
                         btn.BorderBrush = ActiveButtonBorder;
                         icon.Text = "⏸";
-                        lbl.Text = "Pause";
                         ToolTip.SetTip(btn, $"Pause Slot {slotIndex} (Frees Bluetooth radio for phone calls)");
                     }
                 }
