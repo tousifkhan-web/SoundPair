@@ -616,21 +616,27 @@
                             <!-- Live Auto-Sync Status Message -->
                             <TextBlock x:Name="lblPlayerSyncStatus" Text="⚡ Auto-Sync: Ready (VLC / PotPlayer / MPC-HC)" FontSize="11" Foreground="#A0AEC0"/>
 
-                            <!-- Action Buttons: Sync Player & Browser Extension -->
+                            <!-- Action Buttons: Sync Player, Firefox Add-on & Chrome/Edge Extractor -->
                             <Grid Margin="0,2,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="6"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <Button x:Name="btnAutoSyncPlayer" Grid.Column="0" Content="⚡ Sync Player" Height="28"
                                         Background="#23425A" Foreground="#63B3ED" BorderBrush="#3182CE" BorderThickness="1"
                                         Classes="DarkButton" Click="BtnAutoSyncPlayer_Click" HorizontalAlignment="Stretch"
-                                        FontSize="11.5" ToolTip.Tip="Inject current offset into active PotPlayer, VLC, or MPC-HC"/>
-                                <Button x:Name="btnExtensionHelp" Grid.Column="2" Content="🌐 Browser Extension" Height="28"
+                                        FontSize="11" ToolTip.Tip="Inject current offset into active PotPlayer, VLC, or MPC-HC"/>
+                                <Button x:Name="btnExtensionHelp" Grid.Column="2" Content="🦊 Firefox" Height="28"
                                         Background="#1E293B" Foreground="#38BDF8" BorderBrush="#0284C7" BorderThickness="1"
                                         Classes="DarkButton" Click="BtnExtensionHelp_Click" HorizontalAlignment="Stretch"
-                                        FontSize="11.5" ToolTip.Tip="Open Browser Extension folder to install in Chrome, Edge, or Firefox"/>
+                                        FontSize="11" ToolTip.Tip="1-click install from the official Firefox Add-ons Store (Recommended)"/>
+                                <Button x:Name="btnChromeExt" Grid.Column="4" Content="🌐 Chrome/Edge" Height="28"
+                                        Background="#1E293B" Foreground="#A5B4FC" BorderBrush="#4F46E5" BorderThickness="1"
+                                        Classes="DarkButton" Click="BtnChromeExt_Click" HorizontalAlignment="Stretch"
+                                        FontSize="11" ToolTip.Tip="Extract SoundPair extension folder next to SoundPair.exe for Chrome, Edge, or Brave"/>
                             </Grid>
                         </StackPanel>
                     </Border>

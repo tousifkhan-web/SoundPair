@@ -62,6 +62,12 @@ public partial class App : Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            Avalonia.Threading.Dispatcher.UIThread.UnhandledException += (s, e) =>
+            {
+                AppLogger.LogError("UI THREAD UNHANDLED EXCEPTION (Recovered)", e.Exception);
+                e.Handled = true;
+            };
+
             desktop.MainWindow = new MainWindow();
             desktop.Exit += OnAppExit;
         }

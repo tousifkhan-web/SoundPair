@@ -75,7 +75,10 @@ When streaming starts, SoundPair automatically silences your internal PC speaker
 - **Persistent Device Profiles:** Calibrated delays are automatically saved to `device_profiles.json`. When you reconnect or select the same device in the future, SoundPair instantly recalls your calibration profile.
 - **Manual Delay Controls:** Use the `- 10 ms`, `+ 10 ms`, or direct numeric input box for each slot to manually nudge or fine-tune synchronization with zero slider limit constraints. Click the `↺ 0` button to instantly reset any slot back to 0 ms.
 - **Desktop Media Player Lip-Sync Auto-Sync:** When balancing outputs requires buffering, SoundPair calculates the exact audio-to-video delay compensation. Click **⚡ Sync Player** inside Global Calibration (or let SoundPair auto-sync automatically in the background) to inject the exact negative delay into active players (**PotPlayer**, **VLC**, **MPC-HC**, and **MPV**).
-- **Web Browser Video Sync (YouTube / Netflix / Prime Video):** Install the official companion extension (**SoundPair**) in Chrome, Edge, Brave, or Firefox (available on Mozilla Add-ons). It connects to SoundPair's built-in local sync server (`http://127.0.0.1:48888`) and delays HTML5 video playback to match your Bluetooth headphones' physical latency in real-time.
+- **Web Browser Video Sync (YouTube / Netflix / Prime Video):**
+  - **🦊 Firefox (Recommended — 1-Click Install):** Install the official **[SoundPair Firefox Add-on](https://addons.mozilla.org/en-US/firefox/addon/soundpair/)** directly from Mozilla Add-ons.
+  - **🌐 Chrome / Edge / Brave:** Click **🌐 Chrome/Edge** inside SoundPair to automatically extract the bundled extension folder (`SoundPair_Extension`) next to `SoundPair.exe` (or use `browser_extension/` from this repo), enable **Developer mode** at `chrome://extensions`, and click **Load unpacked**.
+  - It connects automatically to SoundPair's local sync server (`http://127.0.0.1:48888`) and delays HTML5 video playback in real-time to match your headphones' latency.
 - **Independent Volume Controls:** Adjust the dedicated volume sliders (0–100%) for each slot independently, or let them synchronize in real-time with your Windows master volume mixer and keyboard media keys.
 
 ### Step 6: Start Streaming

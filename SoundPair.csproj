@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <AvaloniaResource Include="SoundPair.ico" />
+    <EmbeddedResource Include="browser_extension\soundpair.zip" LogicalName="SoundPair.browser_extension.zip" />
   </ItemGroup>
 
   <ItemGroup>

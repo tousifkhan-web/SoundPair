@@ -30,15 +30,26 @@ namespace SoundPair
         private volatile bool _isRunning = false;
         private readonly object _lock = new object();
 
+        private volatile int _currentOffsetMs = 0;
+        private volatile bool _isStreaming = false;
+
         /// <summary>
         /// Current global video-delay offset in milliseconds to broadcast to the browser extension.
         /// </summary>
-        public int CurrentOffsetMs { get; set; } = 0;
+        public int CurrentOffsetMs
+        {
+            get => _currentOffsetMs;
+            set => _currentOffsetMs = value;
+        }
 
         /// <summary>
         /// Streaming state flag indicating whether SoundPair is actively outputting audio.
         /// </summary>
-        public bool IsStreaming { get; set; } = false;
+        public bool IsStreaming
+        {
+            get => _isStreaming;
+            set => _isStreaming = value;
+        }
 
         /// <summary>
         /// Active desktop or web media player status description.

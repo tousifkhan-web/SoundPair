@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -129,9 +130,14 @@ namespace SoundPair
         private WasapiPlayer? _calPlayer;
         private CalibrationClickProvider? _calClickProvider;
         private readonly List<(WasapiPlayer player, CalibrationClickProvider provider, int slotIndex, bool isWireless)> _globalCalOutputs = new();
+        private readonly SemaphoreSlim _calAudioLock = new(1, 1);
+        private CancellationTokenSource? _calAudioCts;
         private readonly Stopwatch _dropStopwatch = new Stopwatch();
         private DispatcherTimer? _autoDropTimer;
         private bool _isDropping = false;
+        private bool _isStartingDrop = false;
+        private bool _isStartStopBusy = false;
+        private volatile bool _isClosing = false;
         private bool _hasImpacted = false;
         private bool _awaitingTap = false;
         private bool _spacebarDown = false; // tracks physical key-hold to suppress auto-repeat
@@ -205,17 +211,25 @@ namespace SoundPair
 
             InitializeTrayIcon();
 
+            string exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+            profilesFilePath = Path.Combine(exeDir, "device_profiles.json");
+
+            // Migrate legacy profile from %AppData%\SoundPair if no local file exists next to the exe yet
             try
             {
-                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                string soundPairFolder = Path.Combine(appData, "SoundPair");
-                Directory.CreateDirectory(soundPairFolder);
-                profilesFilePath = Path.Combine(soundPairFolder, "device_profiles.json");
+                if (!File.Exists(profilesFilePath))
+                {
+                    string legacyPath = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                        "SoundPair",
+                        "device_profiles.json");
+                    if (File.Exists(legacyPath))
+                    {
+                        File.Copy(legacyPath, profilesFilePath, overwrite: false);
+                    }
+                }
             }
-            catch
-            {
-                profilesFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "device_profiles.json");
-            }
+            catch { }
             LoadDeviceProfiles();
 
             comboDevice1.SelectionChanged += ComboDevice1_SelectionChanged;
@@ -287,16 +301,18 @@ namespace SoundPair
 
         private IntPtr WndProcSubclass(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam, UIntPtr uIdSubclass, UIntPtr dwRefData)
         {
-            if (uMsg == WM_DEVICECHANGE)
+            if (uMsg == WM_DEVICECHANGE && !_isClosing)
             {
                 Dispatcher.UIThread.Post(() =>
                 {
+                    if (_isClosing) return;
                     if (debounceTimer == null)
                     {
                         debounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
                         debounceTimer.Tick += (s, args) =>
                         {
                             debounceTimer?.Stop();
+                            if (_isClosing) return;
                             if (isStreaming)
                             {
                                 HandleDeviceChangeWhileStreaming();
@@ -854,23 +870,25 @@ namespace SoundPair
                 UpdateMaxBacklogLimits();
                 UpdateSlotPauseButtonUI(slotIndex, false);
                 player.Play();
+                AppLogger.Log($"[Slot {slotIndex}] Started playback on '{dev.FriendlyName}' (Wireless={isWireless}, TargetRate={targetRate}Hz, Latency={latency}ms, Delay={delayMs}ms)");
             }
             catch (Exception ex)
             {
+                AppLogger.LogError($"StartSlotPlayback Slot {slotIndex}", ex);
                 Debug.WriteLine($"[StartSlotPlayback Error Slot {slotIndex}] {ex.Message}");
             }
         }
 
         private void KillStreamSlot(int slotIndex)
         {
+            WasapiPlayer? oldPlayer = null;
             lock (_bufferLock)
             {
                 switch (slotIndex)
                 {
                     case 1:
                         _slot1Stalled = true;
-                        try { out1?.Stop(); } catch { }
-                        try { out1?.Dispose(); } catch { }
+                        oldPlayer = out1;
                         out1 = null;
                         buffer1 = null;
                         sampleChannel1 = null;
@@ -878,8 +896,7 @@ namespace SoundPair
                         break;
                     case 2:
                         _slot2Stalled = true;
-                        try { out2?.Stop(); } catch { }
-                        try { out2?.Dispose(); } catch { }
+                        oldPlayer = out2;
                         out2 = null;
                         buffer2 = null;
                         sampleChannel2 = null;
@@ -887,14 +904,20 @@ namespace SoundPair
                         break;
                     case 3:
                         _slot3Stalled = true;
-                        try { out3?.Stop(); } catch { }
-                        try { out3?.Dispose(); } catch { }
+                        oldPlayer = out3;
                         out3 = null;
                         buffer3 = null;
                         sampleChannel3 = null;
                         activeId3 = null;
                         break;
                 }
+            }
+
+            // Stop & dispose outside _bufferLock so we never hold the audio lock during thread join / COM teardown
+            if (oldPlayer != null)
+            {
+                try { oldPlayer.Stop(); } catch { }
+                try { oldPlayer.Dispose(); } catch { }
             }
         }
 
@@ -1009,6 +1032,7 @@ namespace SoundPair
             }
             catch (Exception ex)
             {
+                AppLogger.LogError("HandleDeviceChangeWhileStreaming", ex);
                 Debug.WriteLine($"[DeviceChange Handler Error] {ex.Message}");
             }
         }
@@ -1149,9 +1173,24 @@ namespace SoundPair
             });
         }
 
-        private void ComboDevice1_SelectionChanged(object? sender, SelectionChangedEventArgs e) => BindDevice1(GetDeviceFromCombo(comboDevice1));
-        private void ComboDevice2_SelectionChanged(object? sender, SelectionChangedEventArgs e) => BindDevice2(GetDeviceFromCombo(comboDevice2));
-        private void ComboDevice3_SelectionChanged(object? sender, SelectionChangedEventArgs e) => BindDevice3(GetDeviceFromCombo(comboDevice3));
+        /// <summary>
+        /// Safely executes a UI action, catching and logging any unexpected exception so the app never crashes.
+        /// </summary>
+        private static void SafeRun(string actionName, Action action)
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError(actionName, ex);
+            }
+        }
+
+        private void ComboDevice1_SelectionChanged(object? sender, SelectionChangedEventArgs e) => SafeRun("ComboDevice1_SelectionChanged", () => BindDevice1(GetDeviceFromCombo(comboDevice1)));
+        private void ComboDevice2_SelectionChanged(object? sender, SelectionChangedEventArgs e) => SafeRun("ComboDevice2_SelectionChanged", () => BindDevice2(GetDeviceFromCombo(comboDevice2)));
+        private void ComboDevice3_SelectionChanged(object? sender, SelectionChangedEventArgs e) => SafeRun("ComboDevice3_SelectionChanged", () => BindDevice3(GetDeviceFromCombo(comboDevice3)));
 
         private void LoadAudioDevices()
         {
@@ -1411,12 +1450,12 @@ namespace SoundPair
         }
 
         // Master Global Calibration side panel trigger
-        private void BtnGlobalCalibrate_Click(object? sender, RoutedEventArgs e) => OpenSidePanelForSlot(0);
+        private void BtnGlobalCalibrate_Click(object? sender, RoutedEventArgs e) => SafeRun("BtnGlobalCalibrate_Click", () => OpenSidePanelForSlot(0));
 
         // Per-slot Pause / Resume button handlers
-        private void BtnPauseSlot1_Click(object? sender, RoutedEventArgs e) => ToggleSlotPause(1);
-        private void BtnPauseSlot2_Click(object? sender, RoutedEventArgs e) => ToggleSlotPause(2);
-        private void BtnPauseSlot3_Click(object? sender, RoutedEventArgs e) => ToggleSlotPause(3);
+        private void BtnPauseSlot1_Click(object? sender, RoutedEventArgs e) => SafeRun("BtnPauseSlot1_Click", () => ToggleSlotPause(1));
+        private void BtnPauseSlot2_Click(object? sender, RoutedEventArgs e) => SafeRun("BtnPauseSlot2_Click", () => ToggleSlotPause(2));
+        private void BtnPauseSlot3_Click(object? sender, RoutedEventArgs e) => SafeRun("BtnPauseSlot3_Click", () => ToggleSlotPause(3));
 
         /// <summary>
         /// Toggles the streaming state of an individual slot between Paused and Active.
@@ -1472,6 +1511,7 @@ namespace SoundPair
             }
 
             UpdateSlotPauseButtonUI(slotIndex, true);
+            AppLogger.Log($"[User Action] Slot {slotIndex} PAUSED.");
             Debug.WriteLine($"[User Action] Slot {slotIndex} PAUSED. Hardware stream closed & 100% Bluetooth radio airtime freed.");
         }
 
@@ -1662,7 +1702,7 @@ namespace SoundPair
 
         private void BtnCloseSidePanel_Click(object? sender, RoutedEventArgs e)
         {
-            CloseSidePanel();
+            SafeRun("BtnCloseSidePanel_Click", () => CloseSidePanel());
         }
 
         private void CloseSidePanel(bool immediate = false)
@@ -1767,10 +1807,13 @@ namespace SoundPair
 
         private void BtnTabSlot_Click(object? sender, RoutedEventArgs e)
         {
-            if (sender == btnTabGlobal) SelectCalibrationSlot(0);
-            else if (sender == btnTabSlot1) SelectCalibrationSlot(1);
-            else if (sender == btnTabSlot2) SelectCalibrationSlot(2);
-            else if (sender == btnTabSlot3) SelectCalibrationSlot(3);
+            SafeRun("BtnTabSlot_Click", () =>
+            {
+                if (sender == btnTabGlobal) SelectCalibrationSlot(0);
+                else if (sender == btnTabSlot1) SelectCalibrationSlot(1);
+                else if (sender == btnTabSlot2) SelectCalibrationSlot(2);
+                else if (sender == btnTabSlot3) SelectCalibrationSlot(3);
+            });
         }
 
         private void SelectCalibrationSlot(int slotIndex)
@@ -1989,85 +2032,135 @@ namespace SoundPair
 
         private async Task StartCalAudioForCurrentSlotAsync()
         {
+            // Cancel any in-flight calibration audio initialization
+            CancellationTokenSource cts;
+            try
+            {
+                _calAudioCts?.Cancel();
+                _calAudioCts?.Dispose();
+            }
+            catch { }
+            cts = new CancellationTokenSource();
+            _calAudioCts = cts;
+            var token = cts.Token;
+
             int slot = _calActiveSlot;
             MMDevice? dev1 = GetDeviceFromCombo(comboDevice1);
             MMDevice? dev2 = GetDeviceFromCombo(comboDevice2);
             MMDevice? dev3 = GetDeviceFromCombo(comboDevice3);
             MMDevice? singleDev = GetActiveCalDevice();
 
-            await Task.Run(() =>
+            await _calAudioLock.WaitAsync();
+            try
             {
-                StopCalAudio();
+                if (token.IsCancellationRequested || !isVisualCalibrating) return;
 
-                if (slot == 0)
+                await Task.Run(() =>
                 {
-                    var activeDevs = new (MMDevice? dev, int slot)[]
-                    {
-                        (dev1, 1),
-                        (dev2, 2),
-                        (dev3, 3)
-                    };
+                    StopCalAudioInternal();
+                    if (token.IsCancellationRequested) return;
 
-                    foreach (var (dev, slotIndex) in activeDevs)
+                    if (slot == 0)
                     {
-                        if (dev == null) continue;
-                        try
+                        var activeDevs = new (MMDevice? dev, int slot)[]
                         {
-                            bool isWireless = IsWirelessDevice(dev);
-                            int latency = isWireless ? 100 : 50;
-                            string mmcss = isWireless ? "Audio" : "Pro Audio";
+                            (dev1, 1),
+                            (dev2, 2),
+                            (dev3, 3)
+                        };
 
-                            var mixFormat = GetDeviceMixFormat(dev);
-                            var provider = new CalibrationClickProvider(mixFormat.SampleRate, mixFormat.Channels);
-                            var player = new WasapiPlayerBuilder()
-                                .WithDevice(dev)
-                                .WithLatency(latency)
-                                .WithMmcssThreadPriority(mmcss)
-                                .Build();
-
-                            player.Init(provider);
-                            player.Play();
-                            lock (_globalCalOutputs)
+                        foreach (var (dev, slotIndex) in activeDevs)
+                        {
+                            if (token.IsCancellationRequested) break;
+                            if (dev == null) continue;
+                            try
                             {
-                                _globalCalOutputs.Add((player, provider, slotIndex, isWireless));
+                                bool isWireless = IsWirelessDevice(dev);
+                                int latency = isWireless ? 100 : 50;
+                                string mmcss = isWireless ? "Audio" : "Pro Audio";
+
+                                var mixFormat = GetDeviceMixFormat(dev);
+                                var provider = new CalibrationClickProvider(mixFormat.SampleRate, mixFormat.Channels);
+                                var player = new WasapiPlayerBuilder()
+                                    .WithDevice(dev)
+                                    .WithLatency(latency)
+                                    .WithMmcssThreadPriority(mmcss)
+                                    .Build();
+
+                                player.Init(provider);
+                                player.Play();
+                                lock (_globalCalOutputs)
+                                {
+                                    _globalCalOutputs.Add((player, provider, slotIndex, isWireless));
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                AppLogger.LogError($"GlobalCalAudio Slot {slotIndex}", ex);
                             }
                         }
-                        catch (Exception ex)
-                        {
-                            Debug.WriteLine($"[GlobalCalAudio Error] {ex.Message}");
-                        }
+                        return;
                     }
-                    return;
-                }
 
-                if (singleDev == null) return;
+                    if (singleDev == null || token.IsCancellationRequested) return;
+                    try
+                    {
+                        bool isWireless = IsWirelessDevice(singleDev);
+                        int latency = isWireless ? 100 : 50;
+                        string mmcss = isWireless ? "Audio" : "Pro Audio";
+
+                        var mixFormat = GetDeviceMixFormat(singleDev);
+                        var provider = new CalibrationClickProvider(mixFormat.SampleRate, mixFormat.Channels);
+                        var player = new WasapiPlayerBuilder()
+                            .WithDevice(singleDev)
+                            .WithLatency(latency)
+                            .WithMmcssThreadPriority(mmcss)
+                            .Build();
+
+                        player.Init(provider);
+                        player.Play();
+                        _calClickProvider = provider;
+                        _calPlayer = player;
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.LogError($"CalAudio Slot {slot}", ex);
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("StartCalAudioForCurrentSlotAsync", ex);
+            }
+            finally
+            {
+                _calAudioLock.Release();
+            }
+        }
+
+        private void StopCalAudio()
+        {
+            try
+            {
+                _calAudioCts?.Cancel();
+            }
+            catch { }
+
+            _ = Task.Run(async () =>
+            {
+                await _calAudioLock.WaitAsync();
                 try
                 {
-                    bool isWireless = IsWirelessDevice(singleDev);
-                    int latency = isWireless ? 100 : 50;
-                    string mmcss = isWireless ? "Audio" : "Pro Audio";
-
-                    var mixFormat = GetDeviceMixFormat(singleDev);
-                    var provider = new CalibrationClickProvider(mixFormat.SampleRate, mixFormat.Channels);
-                    var player = new WasapiPlayerBuilder()
-                        .WithDevice(singleDev)
-                        .WithLatency(latency)
-                        .WithMmcssThreadPriority(mmcss)
-                        .Build();
-
-                    player.Init(provider);
-                    player.Play();
-                    _calClickProvider = provider;
-                    _calPlayer = player;
+                    StopCalAudioInternal();
                 }
-                catch (Exception ex)
+                finally
                 {
-                    Debug.WriteLine($"[CalAudio Error] {ex.Message}");
+                    _calAudioLock.Release();
                 }
             });
         }
 
-        private void StopCalAudio()
+        private void StopCalAudioInternal()
         {
             lock (_globalCalOutputs)
             {
@@ -2087,70 +2180,88 @@ namespace SoundPair
 
         private void BtnTriggerDrop_Click(object? sender, RoutedEventArgs e)
         {
-            // Always cancel any pending auto-drop timer when user manually clicks
-            _autoDropTimer?.Stop();
-            _autoDropTimer = null;
-
-            // If a previous calibration completed (3+ taps recorded), reset for a fresh run
-            if (_recordedRawTaps.Count >= 3)
+            SafeRun("BtnTriggerDrop_Click", () =>
             {
-                _recordedRawTaps.Clear();
-                _nudgeOffsetMs = 0;
-                if (lblFineTuneVal != null) lblFineTuneVal.Text = "0 ms";
-                UpdateTapDisplay();
-            }
-            StartDrop();
+                // Always cancel any pending auto-drop timer when user manually clicks
+                _autoDropTimer?.Stop();
+                _autoDropTimer = null;
+
+                // If a previous calibration completed (3+ taps recorded), reset for a fresh run
+                if (_recordedRawTaps.Count >= 3)
+                {
+                    _recordedRawTaps.Clear();
+                    _nudgeOffsetMs = 0;
+                    if (lblFineTuneVal != null) lblFineTuneVal.Text = "0 ms";
+                    UpdateTapDisplay();
+                }
+                StartDrop();
+            });
         }
 
         private async void StartDrop()
         {
-            if (_isDropping) return;
+            if (_isDropping || _isStartingDrop) return;
+            _isStartingDrop = true;
 
-            if (_calActiveSlot == 0)
+            try
             {
-                var d1 = GetDeviceFromCombo(comboDevice1);
-                var d2 = GetDeviceFromCombo(comboDevice2);
-                var d3 = GetDeviceFromCombo(comboDevice3);
-                if (d1 == null && d2 == null && d3 == null)
+                if (_calActiveSlot == 0)
                 {
-                    ShowWarning("Please select at least one active output device first.");
-                    return;
+                    var d1 = GetDeviceFromCombo(comboDevice1);
+                    var d2 = GetDeviceFromCombo(comboDevice2);
+                    var d3 = GetDeviceFromCombo(comboDevice3);
+                    if (d1 == null && d2 == null && d3 == null)
+                    {
+                        ShowWarning("Please select at least one active output device first.");
+                        return;
+                    }
+                    if (_globalCalOutputs.Count == 0)
+                    {
+                        await StartCalAudioForCurrentSlotAsync();
+                    }
                 }
-                if (_globalCalOutputs.Count == 0)
+                else
                 {
-                    await StartCalAudioForCurrentSlotAsync();
+                    var dev = GetActiveCalDevice();
+                    if (dev == null)
+                    {
+                        ShowWarning($"Please select an active device for Slot {_calActiveSlot} first.");
+                        return;
+                    }
+
+                    if (_calPlayer == null)
+                    {
+                        await StartCalAudioForCurrentSlotAsync();
+                    }
                 }
+
+                if (!isVisualCalibrating) return;
+
+                _isDropping = true;
+                _hasImpacted = false;
+                _awaitingTap = false;
+                _rippleActive = false;
+
+                lblStagePrompt.Text = "Dropping... Watch the ball & listen!";
+                lblStagePrompt.Foreground = HighlightBrush;
+                borderFeedback.IsVisible = false;
+
+                Canvas.SetTop(ballElement, StartY);
+                rippleRing.Opacity = 0;
+
+                _dropStopwatch.Restart();
+                var topLevel = TopLevel.GetTopLevel(this);
+                topLevel?.RequestAnimationFrame(OnAnimationFrame);
             }
-            else
+            catch (Exception ex)
             {
-                var dev = GetActiveCalDevice();
-                if (dev == null)
-                {
-                    ShowWarning($"Please select an active device for Slot {_calActiveSlot} first.");
-                    return;
-                }
-
-                if (_calPlayer == null)
-                {
-                    await StartCalAudioForCurrentSlotAsync();
-                }
+                AppLogger.LogError("StartDrop", ex);
+                _isDropping = false;
             }
-
-            _isDropping = true;
-            _hasImpacted = false;
-            _awaitingTap = false;
-            _rippleActive = false;
-
-            lblStagePrompt.Text = "Dropping... Watch the ball & listen!";
-            lblStagePrompt.Foreground = HighlightBrush;
-            borderFeedback.IsVisible = false;
-
-            Canvas.SetTop(ballElement, StartY);
-            rippleRing.Opacity = 0;
-
-            _dropStopwatch.Restart();
-            var topLevel = TopLevel.GetTopLevel(this);
-            topLevel?.RequestAnimationFrame(OnAnimationFrame);
+            finally
+            {
+                _isStartingDrop = false;
+            }
         }
 
         private void OnAnimationFrame(TimeSpan time)
@@ -2264,40 +2375,50 @@ namespace SoundPair
 
         private void Window_PreviewKeyDown(object? sender, KeyEventArgs e)
         {
-            if (comboDevice1.IsDropDownOpen || comboDevice2.IsDropDownOpen || comboDevice3.IsDropDownOpen) return;
-            if (TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is TextBox) return;
-
-            if (isVisualCalibrating && this.Width >= 800 && e.Key == Key.Space)
+            SafeRun("Window_PreviewKeyDown", () =>
             {
-                e.Handled = true; // Prevent activating any focused UI button
+                if (comboDevice1.IsDropDownOpen || comboDevice2.IsDropDownOpen || comboDevice3.IsDropDownOpen) return;
+                if (TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is TextBox) return;
 
-                // Suppress OS key-repeat: only act on the first physical key-down event
-                if (_spacebarDown) return;
-                _spacebarDown = true;
+                if (isVisualCalibrating && this.Width >= 800 && e.Key == Key.Space)
+                {
+                    e.Handled = true; // Prevent activating any focused UI button
 
-                HandleSpacebarTap();
-            }
+                    // Suppress OS key-repeat: only act on the first physical key-down event
+                    if (_spacebarDown) return;
+                    _spacebarDown = true;
+
+                    HandleSpacebarTap();
+                }
+            });
         }
 
         // Belt-and-suspenders: OnKeyDown fires even when the Window itself holds focus
         // (no child element focused), which happens when user clicks in the non-focusable side panel.
         protected override void OnKeyDown(KeyEventArgs e)
         {
-            if (TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is TextBox)
+            try
             {
-                base.OnKeyDown(e);
-                return;
-            }
-
-            if (isVisualCalibrating && this.Width >= 800 && e.Key == Key.Space)
-            {
-                e.Handled = true;
-                if (!_spacebarDown)
+                if (TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is TextBox)
                 {
-                    _spacebarDown = true;
-                    HandleSpacebarTap();
+                    base.OnKeyDown(e);
+                    return;
                 }
-                return; // Don't call base — prevents any residual button activation
+
+                if (isVisualCalibrating && this.Width >= 800 && e.Key == Key.Space)
+                {
+                    e.Handled = true;
+                    if (!_spacebarDown)
+                    {
+                        _spacebarDown = true;
+                        HandleSpacebarTap();
+                    }
+                    return; // Don't call base — prevents any residual button activation
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("OnKeyDown", ex);
             }
             base.OnKeyDown(e);
         }
@@ -2470,182 +2591,210 @@ namespace SoundPair
 
         private void ChkHumanReaction_Changed(object? sender, RoutedEventArgs e)
         {
-            if (lblTapHistory == null || lblAvgLatency == null || btnApplyCal == null) return;
-            UpdateTapDisplay();
+            SafeRun("ChkHumanReaction_Changed", () =>
+            {
+                if (lblTapHistory == null || lblAvgLatency == null || btnApplyCal == null) return;
+                UpdateTapDisplay();
+            });
         }
 
         private void BtnResetTaps_Click(object? sender, RoutedEventArgs e)
         {
-            _autoDropTimer?.Stop();
-            _autoDropTimer = null;
-            _recordedRawTaps.Clear();
-            _nudgeOffsetMs = 0;
-            if (lblFineTuneVal != null) lblFineTuneVal.Text = "0 ms";
-            if (borderFeedback != null) borderFeedback.IsVisible = false;
-            if (lblStagePrompt != null)
+            SafeRun("BtnResetTaps_Click", () =>
             {
-                lblStagePrompt.Text = "Taps reset. Click 'Start Drop' or press [Spacebar]!";
-                lblStagePrompt.Foreground = Brushes.White;
-            }
-            UpdateTapDisplay();
+                _autoDropTimer?.Stop();
+                _autoDropTimer = null;
+                _recordedRawTaps.Clear();
+                _nudgeOffsetMs = 0;
+                if (lblFineTuneVal != null) lblFineTuneVal.Text = "0 ms";
+                if (borderFeedback != null) borderFeedback.IsVisible = false;
+                if (lblStagePrompt != null)
+                {
+                    lblStagePrompt.Text = "Taps reset. Click 'Start Drop' or press [Spacebar]!";
+                    lblStagePrompt.Foreground = Brushes.White;
+                }
+                UpdateTapDisplay();
+            });
         }
 
         private void BtnNudgeDown_Click(object? sender, RoutedEventArgs e)
         {
-            _nudgeOffsetMs -= 5;
-            if (lblFineTuneVal != null) lblFineTuneVal.Text = $"{_nudgeOffsetMs:+#;-#;0} ms";
-            UpdateTapDisplay();
+            SafeRun("BtnNudgeDown_Click", () =>
+            {
+                _nudgeOffsetMs -= 5;
+                if (lblFineTuneVal != null) lblFineTuneVal.Text = $"{_nudgeOffsetMs:+#;-#;0} ms";
+                UpdateTapDisplay();
+            });
         }
 
         private void BtnNudgeUp_Click(object? sender, RoutedEventArgs e)
         {
-            _nudgeOffsetMs += 5;
-            if (lblFineTuneVal != null) lblFineTuneVal.Text = $"{_nudgeOffsetMs:+#;-#;0} ms";
-            UpdateTapDisplay();
+            SafeRun("BtnNudgeUp_Click", () =>
+            {
+                _nudgeOffsetMs += 5;
+                if (lblFineTuneVal != null) lblFineTuneVal.Text = $"{_nudgeOffsetMs:+#;-#;0} ms";
+                UpdateTapDisplay();
+            });
         }
 
         private async void BtnApplyCal_Click(object? sender, RoutedEventArgs e)
         {
-            if (_calActiveSlot == 0)
+            try
             {
-                var d1 = GetDeviceFromCombo(comboDevice1);
-                var d2 = GetDeviceFromCombo(comboDevice2);
-                var d3 = GetDeviceFromCombo(comboDevice3);
-
-                if (d1 == null && d2 == null && d3 == null)
+                if (_calActiveSlot == 0)
                 {
-                    ShowWarning("Please select at least one active output device first.");
+                    var d1 = GetDeviceFromCombo(comboDevice1);
+                    var d2 = GetDeviceFromCombo(comboDevice2);
+                    var d3 = GetDeviceFromCombo(comboDevice3);
+
+                    if (d1 == null && d2 == null && d3 == null)
+                    {
+                        ShowWarning("Please select at least one active output device first.");
+                        return;
+                    }
+
+                    int finalLatency = CalculateEffectiveLatency();
+                    if (finalLatency <= 0 && _recordedRawTaps.Count == 0 && globalOffsetMs > 0)
+                    {
+                        finalLatency = globalOffsetMs;
+                    }
+
+                    // 1. Set global Media Lip-Sync Offset
+                    UpdateGlobalOffset(finalLatency);
+
+                    // 2. Calibrate and save all active devices to this latency
+                    if (d1 != null) SaveDeviceProfile(d1.FriendlyName, finalLatency);
+                    if (d2 != null) SaveDeviceProfile(d2.FriendlyName, finalLatency);
+                    if (d3 != null) SaveDeviceProfile(d3.FriendlyName, finalLatency);
+
+                    // 3. Reset delays to 0 since all devices calibrated together in Global sync
+                    SetSlotDelay(1, 0, applyIfStreaming: false);
+                    SetSlotDelay(2, 0, applyIfStreaming: false);
+                    SetSlotDelay(3, 0, applyIfStreaming: false);
+
+                    // 4. Update audio delays in real-time if streaming
+                    if (isStreaming)
+                    {
+                        ApplyDelays();
+                    }
+
+                    lblStatus.Text = $"Status: Global calibration applied & saved for all devices at {finalLatency} ms!";
+                    lblStatus.Foreground = Brushes.LightGreen;
+
+                    if (lblApplyCalText != null) lblApplyCalText.Text = "Saved! ✓";
+                    await Task.Delay(1500);
+                    if (lblApplyCalText != null) lblApplyCalText.Text = "Apply";
                     return;
                 }
 
-                int finalLatency = CalculateEffectiveLatency();
-                if (finalLatency <= 0 && _recordedRawTaps.Count == 0 && globalOffsetMs > 0)
-                {
-                    finalLatency = globalOffsetMs;
-                }
+                var dev = GetActiveCalDevice();
+                if (dev == null) return;
 
-                // 1. Set global Media Lip-Sync Offset
-                UpdateGlobalOffset(finalLatency);
+                int slotLatency = CalculateEffectiveLatency();
+                SaveDeviceProfile(dev.FriendlyName, slotLatency);
 
-                // 2. Calibrate and save all active devices to this latency
-                if (d1 != null) SaveDeviceProfile(d1.FriendlyName, finalLatency);
-                if (d2 != null) SaveDeviceProfile(d2.FriendlyName, finalLatency);
-                if (d3 != null) SaveDeviceProfile(d3.FriendlyName, finalLatency);
-
-                // 3. Reset delays to 0 since all devices calibrated together in Global sync
-                SetSlotDelay(1, 0, applyIfStreaming: false);
-                SetSlotDelay(2, 0, applyIfStreaming: false);
-                SetSlotDelay(3, 0, applyIfStreaming: false);
-
-                // 4. Update audio delays in real-time if streaming
+                // Automatically recalculate multi-device delays and lip-sync offset
+                TryAutoLoadProfilesForActiveDevices(forceEvenIfStreaming: true);
                 if (isStreaming)
                 {
                     ApplyDelays();
                 }
 
-                lblStatus.Text = $"Status: Global calibration applied & saved for all devices at {finalLatency} ms!";
+                lblStatus.Text = $"Status: Slot {_calActiveSlot} ({dev.FriendlyName}) calibrated & saved at {slotLatency} ms!";
                 lblStatus.Foreground = Brushes.LightGreen;
 
                 if (lblApplyCalText != null) lblApplyCalText.Text = "Saved! ✓";
                 await Task.Delay(1500);
                 if (lblApplyCalText != null) lblApplyCalText.Text = "Apply";
-                return;
             }
-
-            var dev = GetActiveCalDevice();
-            if (dev == null) return;
-
-            int slotLatency = CalculateEffectiveLatency();
-            SaveDeviceProfile(dev.FriendlyName, slotLatency);
-
-            // Automatically recalculate multi-device delays and lip-sync offset
-            TryAutoLoadProfilesForActiveDevices(forceEvenIfStreaming: true);
-            if (isStreaming)
+            catch (Exception ex)
             {
-                ApplyDelays();
+                AppLogger.LogError("BtnApplyCal_Click", ex);
+                if (lblApplyCalText != null) lblApplyCalText.Text = "Apply";
             }
-
-            lblStatus.Text = $"Status: Slot {_calActiveSlot} ({dev.FriendlyName}) calibrated & saved at {slotLatency} ms!";
-            lblStatus.Foreground = Brushes.LightGreen;
-
-            if (lblApplyCalText != null) lblApplyCalText.Text = "Saved! ✓";
-            await Task.Delay(1500);
-            if (lblApplyCalText != null) lblApplyCalText.Text = "Apply";
         }
 
         private async void BtnClearSaved_Click(object? sender, RoutedEventArgs e)
         {
-            if (_calActiveSlot == 0)
+            try
             {
-                var d1 = GetDeviceFromCombo(comboDevice1);
-                var d2 = GetDeviceFromCombo(comboDevice2);
-                var d3 = GetDeviceFromCombo(comboDevice3);
-
-                if (d1 != null) ClearDeviceProfile(d1.FriendlyName);
-                if (d2 != null) ClearDeviceProfile(d2.FriendlyName);
-                if (d3 != null) ClearDeviceProfile(d3.FriendlyName);
-
-                SetSlotDelay(1, 0, applyIfStreaming: false);
-                SetSlotDelay(2, 0, applyIfStreaming: false);
-                SetSlotDelay(3, 0, applyIfStreaming: false);
-                UpdateGlobalOffset(0);
-
-                if (isStreaming)
+                if (_calActiveSlot == 0)
                 {
-                    ApplyDelays();
-                }
+                    var d1 = GetDeviceFromCombo(comboDevice1);
+                    var d2 = GetDeviceFromCombo(comboDevice2);
+                    var d3 = GetDeviceFromCombo(comboDevice3);
 
-                _recordedRawTaps.Clear();
-                _nudgeOffsetMs = 0;
-                if (lblFineTuneVal != null) lblFineTuneVal.Text = "0 ms";
+                    if (d1 != null) ClearDeviceProfile(d1.FriendlyName);
+                    if (d2 != null) ClearDeviceProfile(d2.FriendlyName);
+                    if (d3 != null) ClearDeviceProfile(d3.FriendlyName);
 
-                UpdateCalibrationDisplayForCurrentSlot();
+                    SetSlotDelay(1, 0, applyIfStreaming: false);
+                    SetSlotDelay(2, 0, applyIfStreaming: false);
+                    SetSlotDelay(3, 0, applyIfStreaming: false);
+                    UpdateGlobalOffset(0);
 
-                lblStatus.Text = "Status: Cleared all saved profiles & reset delays to 0 ms.";
-                lblStatus.Foreground = Brushes.LightGreen;
-            }
-            else
-            {
-                var dev = GetActiveCalDevice();
-                if (dev != null)
-                {
-                    ClearDeviceProfile(dev.FriendlyName);
-
-                    SetSlotDelay(_calActiveSlot, 0, applyIfStreaming: false);
-
-                    _recordedRawTaps.Clear();
-                    _nudgeOffsetMs = 0;
-                    if (lblFineTuneVal != null) lblFineTuneVal.Text = "0 ms";
-
-                    TryAutoLoadProfilesForActiveDevices(forceEvenIfStreaming: true);
                     if (isStreaming)
                     {
                         ApplyDelays();
                     }
-                    UpdateCalibrationDisplayForCurrentSlot();
-
-                    lblStatus.Text = $"Status: Cleared saved calibration profile for Slot {_calActiveSlot}.";
-                    lblStatus.Foreground = Brushes.LightGreen;
-                }
-                else
-                {
-                    SetSlotDelay(_calActiveSlot, 0, applyIfStreaming: false);
 
                     _recordedRawTaps.Clear();
                     _nudgeOffsetMs = 0;
                     if (lblFineTuneVal != null) lblFineTuneVal.Text = "0 ms";
-                    UpdateCalibrationDisplayForCurrentSlot();
-                }
-            }
 
-            if (lblClearSavedText != null)
-            {
-                lblClearSavedText.Text = "Cleared! ✓";
-                await Task.Delay(1500);
+                    UpdateCalibrationDisplayForCurrentSlot();
+
+                    lblStatus.Text = "Status: Cleared all saved profiles & reset delays to 0 ms.";
+                    lblStatus.Foreground = Brushes.LightGreen;
+                }
+                else
+                {
+                    var dev = GetActiveCalDevice();
+                    if (dev != null)
+                    {
+                        ClearDeviceProfile(dev.FriendlyName);
+
+                        SetSlotDelay(_calActiveSlot, 0, applyIfStreaming: false);
+
+                        _recordedRawTaps.Clear();
+                        _nudgeOffsetMs = 0;
+                        if (lblFineTuneVal != null) lblFineTuneVal.Text = "0 ms";
+
+                        TryAutoLoadProfilesForActiveDevices(forceEvenIfStreaming: true);
+                        if (isStreaming)
+                        {
+                            ApplyDelays();
+                        }
+                        UpdateCalibrationDisplayForCurrentSlot();
+
+                        lblStatus.Text = $"Status: Cleared saved calibration profile for Slot {_calActiveSlot}.";
+                        lblStatus.Foreground = Brushes.LightGreen;
+                    }
+                    else
+                    {
+                        SetSlotDelay(_calActiveSlot, 0, applyIfStreaming: false);
+
+                        _recordedRawTaps.Clear();
+                        _nudgeOffsetMs = 0;
+                        if (lblFineTuneVal != null) lblFineTuneVal.Text = "0 ms";
+                        UpdateCalibrationDisplayForCurrentSlot();
+                    }
+                }
+
                 if (lblClearSavedText != null)
                 {
-                    lblClearSavedText.Text = "Clear";
+                    lblClearSavedText.Text = "Cleared! ✓";
+                    await Task.Delay(1500);
+                    if (lblClearSavedText != null)
+                    {
+                        lblClearSavedText.Text = "Clear";
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("BtnClearSaved_Click", ex);
+                if (lblClearSavedText != null) lblClearSavedText.Text = "Clear";
             }
         }
 
@@ -2692,48 +2841,84 @@ namespace SoundPair
             }
             finally
             {
-                await Task.Delay(500);
-                if (btnAutoSyncPlayer != null)
+                try
                 {
-                    btnAutoSyncPlayer.IsEnabled = true;
-                    btnAutoSyncPlayer.Content = "⚡ Sync Player";
+                    await Task.Delay(500);
+                    if (btnAutoSyncPlayer != null)
+                    {
+                        btnAutoSyncPlayer.IsEnabled = true;
+                        btnAutoSyncPlayer.Content = "⚡ Sync Player";
+                    }
                 }
+                catch { }
             }
         }
 
         private void BtnExtensionHelp_Click(object? sender, RoutedEventArgs e)
         {
-            try
+            SafeRun("BtnExtensionHelp_Click", () =>
             {
-                string extDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "browser_extension");
-                if (!Directory.Exists(extDir))
+                // Open the official Firefox Add-ons Store page directly for 1-click installation
+                Process.Start(new ProcessStartInfo
                 {
-                    string fallback = Path.Combine(Directory.GetCurrentDirectory(), "browser_extension");
-                    if (Directory.Exists(fallback)) extDir = fallback;
+                    FileName = "https://addons.mozilla.org/en-US/firefox/addon/soundpair/",
+                    UseShellExecute = true
+                });
+            });
+        }
+
+        private void BtnChromeExt_Click(object? sender, RoutedEventArgs e)
+        {
+            SafeRun("BtnChromeExt_Click", () =>
+            {
+                string exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+                string targetDir = Path.Combine(exeDir, "SoundPair_Extension");
+
+                // Extract the embedded extension zip so Chrome/Edge/Brave users can load unpacked even from standalone SoundPair.exe
+                using var stream = typeof(MainWindow).Assembly.GetManifestResourceStream("SoundPair.browser_extension.zip");
+                if (stream != null)
+                {
+                    Directory.CreateDirectory(targetDir);
+                    using var archive = new System.IO.Compression.ZipArchive(stream, System.IO.Compression.ZipArchiveMode.Read);
+                    foreach (var entry in archive.Entries)
+                    {
+                        if (string.IsNullOrEmpty(entry.Name)) continue;
+                        string destPath = Path.Combine(targetDir, entry.FullName);
+                        string? destParent = Path.GetDirectoryName(destPath);
+                        if (!string.IsNullOrEmpty(destParent)) Directory.CreateDirectory(destParent);
+                        using var entryStream = entry.Open();
+                        using var fileStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+                        entryStream.CopyTo(fileStream);
+                    }
+                }
+                else
+                {
+                    // Fallback to local browser_extension folder if running from source
+                    string localExt = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "browser_extension");
+                    if (Directory.Exists(localExt)) targetDir = localExt;
                 }
 
-                if (Directory.Exists(extDir))
+                if (Directory.Exists(targetDir))
                 {
                     Process.Start(new ProcessStartInfo
                     {
                         FileName = "explorer.exe",
-                        Arguments = $"\"{extDir}\"",
+                        Arguments = $"\"{targetDir}\"",
                         UseShellExecute = true
                     });
+
+                    MessageBoxW(
+                        _hwnd,
+                        $"The extension folder has been extracted and opened:\n{targetDir}\n\n" +
+                        "To install in Chrome, Edge, or Brave:\n" +
+                        "1. Open chrome://extensions (or edge://extensions)\n" +
+                        "2. Turn ON 'Developer mode' (top-right)\n" +
+                        "3. Click 'Load unpacked' and select the 'SoundPair_Extension' folder.\n\n" +
+                        "Tip: Firefox users can install in 1 click using the 🦊 Firefox button!",
+                        "Install SoundPair Extension (Chrome / Edge / Brave)",
+                        MB_OK | 0x00000040 /* MB_ICONINFORMATION */);
                 }
-                else
-                {
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = "https://github.com/tousifkhan-web/SoundPair#readme",
-                        UseShellExecute = true
-                    });
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[ExtensionHelp Error] {ex.Message}");
-            }
+            });
         }
 
         #endregion
@@ -2759,7 +2944,8 @@ namespace SoundPair
 
         private async void BtnStart_Click(object? sender, RoutedEventArgs e)
         {
-            if (isStreaming) return;
+            if (isStreaming || _isStartStopBusy) return;
+            _isStartStopBusy = true;
             if (isVisualCalibrating)
             {
                 CloseSidePanel(true);
@@ -2771,6 +2957,7 @@ namespace SoundPair
 
             if (dev1 == null && dev2 == null && dev3 == null)
             {
+                _isStartStopBusy = false;
                 ShowWarning("Please select at least one active output.");
                 return;
             }
@@ -2888,6 +3075,7 @@ namespace SoundPair
                     }
                     catch (Exception ex)
                     {
+                        AppLogger.LogError("AudioCapture DataAvailable", ex);
                         Debug.WriteLine($"[AudioCapture Error] {ex.Message}");
                     }
                 };
@@ -2917,9 +3105,14 @@ namespace SoundPair
             }
             catch (Exception ex)
             {
+                AppLogger.LogError("BtnStart_Click Stream Failed", ex);
                 isStreaming = false;
                 ShowError($"Stream failed: {ex.Message}");
                 BtnStop_Click(null, null);
+            }
+            finally
+            {
+                _isStartStopBusy = false;
             }
         }
 
@@ -3040,125 +3233,150 @@ namespace SoundPair
 
         private void BtnDelayDown_Click(object? sender, RoutedEventArgs e)
         {
-            if (sender is Button btn && btn.Tag is string tagStr && int.TryParse(tagStr, out int slot))
+            SafeRun("BtnDelayDown_Click", () =>
             {
-                int current = slot switch { 1 => delay1Ms, 2 => delay2Ms, 3 => delay3Ms, _ => 0 };
-                SetSlotDelay(slot, Math.Max(0, current - 10));
-            }
+                if (sender is Button btn && btn.Tag is string tagStr && int.TryParse(tagStr, out int slot))
+                {
+                    int current = slot switch { 1 => delay1Ms, 2 => delay2Ms, 3 => delay3Ms, _ => 0 };
+                    SetSlotDelay(slot, Math.Max(0, current - 10));
+                }
+            });
         }
 
         private void BtnDelayUp_Click(object? sender, RoutedEventArgs e)
         {
-            if (sender is Button btn && btn.Tag is string tagStr && int.TryParse(tagStr, out int slot))
+            SafeRun("BtnDelayUp_Click", () =>
             {
-                int current = slot switch { 1 => delay1Ms, 2 => delay2Ms, 3 => delay3Ms, _ => 0 };
-                SetSlotDelay(slot, current + 10);
-            }
+                if (sender is Button btn && btn.Tag is string tagStr && int.TryParse(tagStr, out int slot))
+                {
+                    int current = slot switch { 1 => delay1Ms, 2 => delay2Ms, 3 => delay3Ms, _ => 0 };
+                    SetSlotDelay(slot, current + 10);
+                }
+            });
         }
 
         private void BtnDelayReset_Click(object? sender, RoutedEventArgs e)
         {
-            if (sender is Button btn && btn.Tag is string tagStr && int.TryParse(tagStr, out int slot))
+            SafeRun("BtnDelayReset_Click", () =>
             {
-                SetSlotDelay(slot, 0);
-            }
+                if (sender is Button btn && btn.Tag is string tagStr && int.TryParse(tagStr, out int slot))
+                {
+                    SetSlotDelay(slot, 0);
+                }
+            });
         }
 
         private async void BtnDelaySave_Click(object? sender, RoutedEventArgs e)
         {
-            if (sender is Button btn && btn.Tag is string tagStr && int.TryParse(tagStr, out int slot))
+            try
             {
-                var dev = slot switch
+                if (sender is Button btn && btn.Tag is string tagStr && int.TryParse(tagStr, out int slot))
                 {
-                    1 => GetDeviceFromCombo(comboDevice1),
-                    2 => GetDeviceFromCombo(comboDevice2),
-                    3 => GetDeviceFromCombo(comboDevice3),
-                    _ => null
-                };
+                    var dev = slot switch
+                    {
+                        1 => GetDeviceFromCombo(comboDevice1),
+                        2 => GetDeviceFromCombo(comboDevice2),
+                        3 => GetDeviceFromCombo(comboDevice3),
+                        _ => null
+                    };
 
-                if (dev == null)
-                {
-                    ShowWarning($"Please select an active output device for Slot {slot} first.");
-                    return;
+                    if (dev == null)
+                    {
+                        ShowWarning($"Please select an active output device for Slot {slot} first.");
+                        return;
+                    }
+
+                    int currentDelay = slot switch
+                    {
+                        1 => delay1Ms,
+                        2 => delay2Ms,
+                        3 => delay3Ms,
+                        _ => 0
+                    };
+
+                    SaveDeviceDelay(dev.FriendlyName, currentDelay);
+                    SaveDeviceProfile(dev.FriendlyName, currentDelay);
+
+                    if (isStreaming)
+                    {
+                        ApplyDelays();
+                    }
+
+                    if (lblStatus != null)
+                    {
+                        lblStatus.Text = $"Status: Saved {currentDelay} ms delay for Slot {slot} ({dev.FriendlyName})!";
+                        lblStatus.Foreground = Brushes.LightGreen;
+                    }
+
+                    object? originalContent = btn.Content;
+                    var originalBg = btn.Background;
+                    var originalFg = btn.Foreground;
+
+                    btn.Content = "Saved! ✓";
+                    btn.Background = new SolidColorBrush(Color.FromRgb(30, 58, 43));
+                    btn.Foreground = new SolidColorBrush(Color.FromRgb(112, 255, 160));
+                    await Task.Delay(1500);
+                    btn.Content = originalContent;
+                    btn.Background = originalBg;
+                    btn.Foreground = originalFg;
                 }
-
-                int currentDelay = slot switch
-                {
-                    1 => delay1Ms,
-                    2 => delay2Ms,
-                    3 => delay3Ms,
-                    _ => 0
-                };
-
-                SaveDeviceDelay(dev.FriendlyName, currentDelay);
-                SaveDeviceProfile(dev.FriendlyName, currentDelay);
-
-                if (isStreaming)
-                {
-                    ApplyDelays();
-                }
-
-                if (lblStatus != null)
-                {
-                    lblStatus.Text = $"Status: Saved {currentDelay} ms delay for Slot {slot} ({dev.FriendlyName})!";
-                    lblStatus.Foreground = Brushes.LightGreen;
-                }
-
-                object? originalContent = btn.Content;
-                var originalBg = btn.Background;
-                var originalFg = btn.Foreground;
-
-                btn.Content = "Saved! ✓";
-                btn.Background = new SolidColorBrush(Color.FromRgb(30, 58, 43));
-                btn.Foreground = new SolidColorBrush(Color.FromRgb(112, 255, 160));
-                await Task.Delay(1500);
-                btn.Content = originalContent;
-                btn.Background = originalBg;
-                btn.Foreground = originalFg;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("BtnDelaySave_Click", ex);
             }
         }
 
         private void TxtDelay_TextChanged(object? sender, TextChangedEventArgs e)
         {
-            if (_isUpdatingDelayText) return;
-            if (sender is TextBox tb && tb.Tag is string tagStr && int.TryParse(tagStr, out int slot))
+            SafeRun("TxtDelay_TextChanged", () =>
             {
-                string text = tb.Text?.Trim() ?? "";
-                if (string.IsNullOrEmpty(text)) return;
-
-                if (int.TryParse(text, out int parsed))
+                if (_isUpdatingDelayText) return;
+                if (sender is TextBox tb && tb.Tag is string tagStr && int.TryParse(tagStr, out int slot))
                 {
-                    int clamped = Math.Clamp(parsed, 0, 3000);
-                    switch (slot)
-                    {
-                        case 1: delay1Ms = clamped; break;
-                        case 2: delay2Ms = clamped; break;
-                        case 3: delay3Ms = clamped; break;
-                    }
+                    string text = tb.Text?.Trim() ?? "";
+                    if (string.IsNullOrEmpty(text)) return;
 
-                    if (isStreaming)
+                    if (int.TryParse(text, out int parsed))
                     {
-                        DebounceApplyDelays();
+                        int clamped = Math.Clamp(parsed, 0, 3000);
+                        switch (slot)
+                        {
+                            case 1: delay1Ms = clamped; break;
+                            case 2: delay2Ms = clamped; break;
+                            case 3: delay3Ms = clamped; break;
+                        }
+
+                        UpdateMaxBacklogLimits();
+                        UpdateGlobalOffset(Math.Max(delay1Ms, Math.Max(delay2Ms, delay3Ms)));
+
+                        if (isStreaming)
+                        {
+                            DebounceApplyDelays();
+                        }
                     }
                 }
-            }
+            });
         }
 
         private void TxtDelay_LostFocus(object? sender, RoutedEventArgs e)
         {
-            if (sender is TextBox tb && tb.Tag is string tagStr && int.TryParse(tagStr, out int slot))
+            SafeRun("TxtDelay_LostFocus", () =>
             {
-                int current = slot switch { 1 => delay1Ms, 2 => delay2Ms, 3 => delay3Ms, _ => 0 };
-                _isUpdatingDelayText = true;
-                try
+                if (sender is TextBox tb && tb.Tag is string tagStr && int.TryParse(tagStr, out int slot))
                 {
-                    tb.Text = current.ToString();
+                    int current = slot switch { 1 => delay1Ms, 2 => delay2Ms, 3 => delay3Ms, _ => 0 };
+                    _isUpdatingDelayText = true;
+                    try
+                    {
+                        tb.Text = current.ToString();
+                    }
+                    finally
+                    {
+                        _isUpdatingDelayText = false;
+                    }
                 }
-                finally
-                {
-                    _isUpdatingDelayText = false;
-                }
-            }
+            });
         }
 
         private void SetSlotDelay(int slotIndex, int newDelayMs, bool applyIfStreaming = true)
@@ -3192,9 +3410,13 @@ namespace SoundPair
             }
 
             UpdateMaxBacklogLimits();
-            if (applyIfStreaming && isStreaming)
+            if (applyIfStreaming)
             {
-                DebounceApplyDelays();
+                UpdateGlobalOffset(Math.Max(delay1Ms, Math.Max(delay2Ms, delay3Ms)));
+                if (isStreaming)
+                {
+                    DebounceApplyDelays();
+                }
             }
         }
 
@@ -3261,62 +3483,84 @@ namespace SoundPair
 
         private void BtnStop_Click(object? sender, RoutedEventArgs? e)
         {
-            _mediaPlayerWatcherTimer?.Stop();
-            _mediaPlayerSyncService.ResetSyncedTracking();
-
-            if (defaultRenderDevice != null)
+            SafeRun("BtnStop_Click", () =>
             {
-                try { defaultRenderDevice.AudioEndpointVolume.OnVolumeNotification -= OnSystemVolumeNotification; } catch { }
-                try { defaultRenderDevice.AudioEndpointVolume.Mute = _originalSpeakerMuteState; } catch { }
-                defaultRenderDevice.Dispose();
-                defaultRenderDevice = null;
-            }
+                _mediaPlayerWatcherTimer?.Stop();
+                _mediaPlayerSyncService.ResetSyncedTracking();
 
-            try { capture?.StopRecording(); } catch { }
-            try { out1?.Stop(); } catch { }
-            try { out2?.Stop(); } catch { }
-            try { out3?.Stop(); } catch { }
+                if (defaultRenderDevice != null)
+                {
+                    try { defaultRenderDevice.AudioEndpointVolume.OnVolumeNotification -= OnSystemVolumeNotification; } catch { }
+                    try { defaultRenderDevice.AudioEndpointVolume.Mute = _originalSpeakerMuteState; } catch { }
+                    try { defaultRenderDevice.Dispose(); } catch { }
+                    defaultRenderDevice = null;
+                }
 
-            capture?.Dispose(); capture = null;
-            out1?.Dispose(); out1 = null;
-            out2?.Dispose(); out2 = null;
-            out3?.Dispose(); out3 = null;
+                try { capture?.StopRecording(); } catch { }
+                try { out1?.Stop(); } catch { }
+                try { out2?.Stop(); } catch { }
+                try { out3?.Stop(); } catch { }
 
-            lock (_bufferLock)
-            {
-                buffer1 = buffer2 = buffer3 = null;
-            }
-            sampleChannel1 = sampleChannel2 = sampleChannel3 = null;
-            activeId1 = activeId2 = activeId3 = null;
-            _slot1Stalled = _slot2Stalled = _slot3Stalled = false;
-            _isSlot1UserPaused = _isSlot2UserPaused = _isSlot3UserPaused = false;
-            UpdateSlotPauseButtonUI(1, false);
-            UpdateSlotPauseButtonUI(2, false);
-            UpdateSlotPauseButtonUI(3, false);
-            _maxBacklogBytes1 = _maxBacklogBytes2 = _maxBacklogBytes3 = int.MaxValue;
+                try { capture?.Dispose(); } catch { }
+                capture = null;
+                try { out1?.Dispose(); } catch { }
+                out1 = null;
+                try { out2?.Dispose(); } catch { }
+                out2 = null;
+                try { out3?.Dispose(); } catch { }
+                out3 = null;
 
-            isStreaming = false;
-            btnStart.IsEnabled = true;
-            btnStop.IsEnabled = false;
-            btnStop.Background = new SolidColorBrush(Color.FromRgb(51, 51, 51));
-            btnStop.Foreground = Brushes.White;
+                lock (_bufferLock)
+                {
+                    buffer1 = buffer2 = buffer3 = null;
+                }
+                sampleChannel1 = sampleChannel2 = sampleChannel3 = null;
+                activeId1 = activeId2 = activeId3 = null;
+                _slot1Stalled = _slot2Stalled = _slot3Stalled = false;
+                _isSlot1UserPaused = _isSlot2UserPaused = _isSlot3UserPaused = false;
+                UpdateSlotPauseButtonUI(1, false);
+                UpdateSlotPauseButtonUI(2, false);
+                UpdateSlotPauseButtonUI(3, false);
+                _maxBacklogBytes1 = _maxBacklogBytes2 = _maxBacklogBytes3 = int.MaxValue;
 
-            comboDevice1.IsEnabled = comboDevice2.IsEnabled = comboDevice3.IsEnabled = true;
-            lblStatus.Text = "Status: Stopped";
-            lblStatus.Foreground = TextSecBrush;
+                isStreaming = false;
+                if (btnStart != null) btnStart.IsEnabled = true;
+                if (btnStop != null)
+                {
+                    btnStop.IsEnabled = false;
+                    btnStop.Background = new SolidColorBrush(Color.FromRgb(51, 51, 51));
+                    btnStop.Foreground = Brushes.White;
+                }
 
-            _browserSyncServer.IsStreaming = false;
-            if (lblPlayerSyncStatus != null)
-            {
-                lblPlayerSyncStatus.Text = "⚡ Auto-Sync: Idle (Ready for PotPlayer / VLC / MPC-HC)";
-                lblPlayerSyncStatus.Foreground = new SolidColorBrush(Color.FromRgb(160, 174, 192));
-            }
+                if (comboDevice1 != null) comboDevice1.IsEnabled = true;
+                if (comboDevice2 != null) comboDevice2.IsEnabled = true;
+                if (comboDevice3 != null) comboDevice3.IsEnabled = true;
+                if (lblStatus != null)
+                {
+                    lblStatus.Text = "Status: Stopped";
+                    lblStatus.Foreground = TextSecBrush;
+                }
+
+                _browserSyncServer.IsStreaming = false;
+                if (lblPlayerSyncStatus != null)
+                {
+                    lblPlayerSyncStatus.Text = "⚡ Auto-Sync: Idle (Ready for PotPlayer / VLC / MPC-HC)";
+                    lblPlayerSyncStatus.Foreground = new SolidColorBrush(Color.FromRgb(160, 174, 192));
+                }
+
+                // Refresh device dropdowns in case headsets connected/disconnected while streaming
+                if (!_isClosing)
+                {
+                    LoadAudioDevices();
+                }
+            });
         }
 
         #endregion
 
         protected override void OnClosing(WindowClosingEventArgs e)
         {
+            _isClosing = true;
             try
             {
                 _mediaPlayerWatcherTimer?.Stop();

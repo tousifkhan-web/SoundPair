@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using Avalonia;
 
 namespace SoundPair;
@@ -11,12 +12,15 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        AppLogger.Initialize();
+
         // 1. Trap unhandled AppDomain exceptions (e.g. unexpected COM audio driver errors)
         AppDomain.CurrentDomain.UnhandledException += (s, e) =>
         {
             try
             {
                 var ex = e.ExceptionObject as Exception;
+                AppLogger.LogError($"CRITICAL UNHANDLED EXCEPTION (Terminating={e.IsTerminating})", ex);
                 System.Diagnostics.Debug.WriteLine($"[CRITICAL UNHANDLED EXCEPTION] {ex?.Message}\n{ex?.StackTrace}");
             }
             catch { }
@@ -27,6 +31,7 @@ internal static class Program
         {
             try
             {
+                AppLogger.LogError("UNOBSERVED TASK EXCEPTION", e.Exception);
                 System.Diagnostics.Debug.WriteLine($"[UNOBSERVED TASK EXCEPTION] {e.Exception?.Message}");
                 e.SetObserved();
             }
@@ -34,7 +39,19 @@ internal static class Program
         };
 
         // 3. Start Avalonia Desktop application lifetime
-        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        try
+        {
+            BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        }
+        catch (Exception ex)
+        {
+            AppLogger.LogError("FATAL MAIN LOOP EXCEPTION", ex);
+            throw;
+        }
+        finally
+        {
+            AppLogger.Shutdown();
+        }
     }
 
     /// <summary>
